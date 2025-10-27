@@ -20,6 +20,7 @@
       },
       "package": "com.yourcompany.rentreminder",
       "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
         "android.permission.POST_NOTIFICATIONS"
       ],
       "edgeToEdgeEnabled": true,
@@ -54,6 +55,12 @@
       "eas": {
         "projectId": "8c12112f-518d-4393-a1a1-b6c1a5ec4cb6"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/8c12112f-518d-4393-a1a1-b6c1a5ec4cb6"
     }
   }
 }

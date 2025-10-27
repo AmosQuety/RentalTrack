@@ -2,10 +2,16 @@
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import * as SQLite from 'expo-sqlite';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
-// Get database instance directly
-const db = SQLite.openDatabaseSync('RentReminderDB');
+// --- ✅ Lazy database initialization ---
+let db: SQLite.SQLiteDatabase | null = null;
+function getDB() {
+  if (!db && Platform.OS !== 'web') {
+    db = SQLite.openDatabaseSync('RentReminderDB');
+  }
+  return db;
+}
 
 // Configure notification handler - UPDATED
 Notifications.setNotificationHandler({
@@ -122,6 +128,7 @@ export class NotificationService {
       
       const tenant = await Database.getTenant(tenantId);
       const settings = await Database.getSettings();
+      const db = getDB();
 
       if (!tenant || !settings) {
         throw new Error('Tenant or settings not found');
