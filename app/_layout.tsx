@@ -1,10 +1,9 @@
 // app/_layout.tsx
 
-import * as NavigationBar from 'expo-navigation-bar';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NotificationService } from '../services/notifications';
 
@@ -12,21 +11,7 @@ import { NotificationService } from '../services/notifications';
 export default function RootLayout() {
   const router = useRouter();
 
-   useEffect(() => {
-    // Configure Android navigation bar
-    const setupNavigationBar = async () => {
-      try {
-        if (Platform.OS === 'android') {
-          await NavigationBar.setBackgroundColorAsync('#FFFFFF'); // White background
-          await NavigationBar.setButtonStyleAsync('dark'); // Dark buttons (back, home, recent apps)
-        }
-      } catch (error) {
-        console.log('Navigation bar setup error:', error);
-      }
-    };
-
-    setupNavigationBar();
-  }, []);
+   
 
   useEffect(() => {
     const removeHandler = NotificationService.setupNotificationResponseHandler(async (response) => {
