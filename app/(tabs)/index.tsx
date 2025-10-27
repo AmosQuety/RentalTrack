@@ -1,13 +1,14 @@
-// app/(tabs)/index.tsx
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+// app/(tabs)/index.tsx - WITH AUTO-REFRESH
+import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
-import { useDatabase } from '../../hooks/use-db';
+import React, { useCallback, useEffect, useState } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useAutoRefresh, useDatabase } from '../../hooks/use-db';
 import { Tenant } from '../../libs/types';
 
 export default function Dashboard() {
   const router = useRouter();
-  const { isInitialized, getAllTenants } = useDatabase();
+  const { isInitialized, getAllTenants, getPaymentStats } = useDatabase();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [stats, setStats] = useState({
     total: 0,
@@ -15,11 +16,18 @@ export default function Dashboard() {
     dueSoon: 0,
     overdue: 0
   });
+  const [paymentStats, setPaymentStats] = useState({
+    totalCollected: 0,
+    thisMonth: 0,
+    lastMonth: 0,
+    overdueAmount: 0,
+  });
 
-  const loadTenants = async () => {
+  const loadData = useCallback(async () => {
     if (!isInitialized) return;
     
     try {
+      console.log('🔄 Dashboard: Loading data...');
       const allTenants = await getAllTenants();
       setTenants(allTenants);
       
@@ -29,14 +37,41 @@ export default function Dashboard() {
         dueSoon: allTenants.filter(t => t.status === 'Due Soon').length,
         overdue: allTenants.filter(t => t.status === 'Overdue').length
       });
-    } catch (error) {
-      console.error('Failed to load tenants:', error);
-    }
-  };
 
+      const stats = await getPaymentStats();
+      setPaymentStats(stats);
+      console.log('✅ Dashboard: Data loaded');
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+    }
+  }, [isInitialized, getAllTenants, getPaymentStats]);
+
+  // Auto-refresh on database changes
+  const { isRefreshing, refresh } = useAutoRefresh(loadData, [
+    'tenant_added',
+    'tenant_updated',
+    'tenant_deleted',
+    'payment_recorded'
+  ]);
+
+  // Initial load
   useEffect(() => {
-    loadTenants();
-  }, [isInitialized]);
+    loadData();
+  }, [loadData]);
+
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('🎯 Dashboard: Screen focused, refreshing...');
+      loadData();
+    }, [loadData])
+  );
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-UG', {
+      minimumFractionDigits: 0,
+    }).format(amount);
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -56,8 +91,21 @@ export default function Dashboard() {
   }
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>Rental Dashboard</Text>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={refresh}
+          colors={['#007AFF']}
+          tintColor="#007AFF"
+        />
+      }
+    >
+      <View style={styles.header}>
+        <Text style={styles.title}>Rental Dashboard</Text>
+        <Text style={styles.subtitle}>Pull down to refresh</Text>
+      </View>
       
       {/* Stats Cards */}
       <View style={styles.statsContainer}>
@@ -68,6 +116,22 @@ export default function Dashboard() {
         <View style={[styles.statCard, { backgroundColor: '#D1FAE5' }]}>
           <Text style={styles.statLabel}>Paid</Text>
           <Text style={styles.statValue}>{stats.paid}</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: '#DBEAFE' }]}>
+          <Text style={styles.statLabel}>Total Collected</Text>
+          <Text style={styles.statValue}>{formatCurrency(paymentStats.totalCollected)} UGX</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: '#D1FAE5' }]}>
+          <Text style={styles.statLabel}>This Month</Text>
+          <Text style={styles.statValue}>{formatCurrency(paymentStats.thisMonth)} UGX</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: '#FEF3C7' }]}>
+          <Text style={styles.statLabel}>Last Month</Text>
+          <Text style={styles.statValue}>{formatCurrency(paymentStats.lastMonth)} UGX</Text>
+        </View>
+        <View style={[styles.statCard, { backgroundColor: '#FEE2E2' }]}>
+          <Text style={styles.statLabel}>Overdue</Text>
+          <Text style={styles.statValue}>{formatCurrency(paymentStats.overdueAmount)} UGX</Text>
         </View>
         <View style={[styles.statCard, { backgroundColor: '#FEF3C7' }]}>
           <Text style={styles.statLabel}>Due Soon</Text>
@@ -141,11 +205,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  header: {
+    marginBottom: 16,
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 16,
     color: '#1F2937',
+  },
+  subtitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 4,
   },
   statsContainer: {
     flexDirection: 'row',

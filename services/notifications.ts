@@ -1,14 +1,17 @@
 // services/notifications.ts
-import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import Constants from 'expo-constants';
-import { Platform, Alert, ToastAndroid } from 'react-native';
-import Database from '../db/database';
+import * as Notifications from 'expo-notifications';
+import * as SQLite from 'expo-sqlite';
+import { Alert } from 'react-native';
 
-// Configure notification handler
+// Get database instance directly
+const db = SQLite.openDatabaseSync('RentReminderDB');
+
+// Configure notification handler - UPDATED
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,  // NEW - Shows banner
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
@@ -114,6 +117,9 @@ export class NotificationService {
     customMessage?: string
   ): Promise<void> {
     try {
+      // Import Database methods
+      const Database = (await import('../db/database')).default;
+      
       const tenant = await Database.getTenant(tenantId);
       const settings = await Database.getSettings();
 
@@ -142,13 +148,13 @@ export class NotificationService {
       }
 
       const message = customMessage || 
-        `Rent payment of ${settings.currency} ${tenant.monthly_rent} due for ${tenant.name} (Room ${tenant.room_number})`;
+        `Rent payment of UGX ${tenant.monthly_rent} due for ${tenant.name} (Room ${tenant.room_number})`;
 
-      // Store reminder in database
-      await Database.executeQuery(
-        `INSERT INTO reminders (tenant_id, due_date, reminder_date, message) 
-         VALUES (?, ?, ?, ?)`,
-        [tenantId, dueDate, reminderDate.toISOString(), message]
+      // Insert reminder directly using db
+      await db.runAsync(
+        `INSERT INTO reminders (tenant_id, due_date, reminder_date, message, status) 
+         VALUES (?, ?, ?, ?, ?)`,
+        [tenantId, dueDate, reminderDate.toISOString(), message, 'Pending']
       );
 
       // Schedule notification
@@ -161,15 +167,65 @@ export class NotificationService {
           tenantName: tenant.name,
           roomNumber: tenant.room_number,
           amount: tenant.monthly_rent,
-          currency: settings.currency,
           dueDate: dueDate,
           type: 'rent_reminder'
         }
       );
 
-      console.log(`✅ Reminder created for ${tenant.name}`);
+      console.log(`✅ Reminder created for ${tenant.name} on ${reminderDate.toISOString()}`);
     } catch (error) {
       console.error('❌ Failed to create reminder:', error);
+      throw error;
+    }
+  }
+
+  // NEW: Snooze reminder
+  static async snoozeReminder(
+    tenantId: number,
+    originalDueDate: string,
+    snoozeDays: number = 1
+  ): Promise<void> {
+    try {
+      const Database = (await import('../db/database')).default;
+      const tenant = await Database.getTenant(tenantId);
+      const settings = await Database.getSettings();
+
+      if (!tenant || !settings) {
+        throw new Error('Tenant or settings not found');
+      }
+
+      // Calculate snooze date
+      const snoozeDate = new Date();
+      snoozeDate.setDate(snoozeDate.getDate() + snoozeDays);
+      snoozeDate.setHours(parseInt(settings.reminder_time.split(':')[0], 10));
+      snoozeDate.setMinutes(parseInt(settings.reminder_time.split(':')[1], 10));
+
+      const message = `⏰ Snoozed: Rent reminder for ${tenant.name} (Room ${tenant.room_number})`;
+
+      // Insert snoozed reminder
+      await db.runAsync(
+        `INSERT INTO reminders (tenant_id, due_date, reminder_date, message, status) 
+         VALUES (?, ?, ?, ?, ?)`,
+        [tenantId, originalDueDate, snoozeDate.toISOString(), message, 'Pending']
+      );
+
+      // Schedule notification
+      await this.scheduleNotification(
+        `⏰ Snoozed: ${tenant.name}`,
+        message,
+        { date: snoozeDate },
+        {
+          tenantId,
+          tenantName: tenant.name,
+          roomNumber: tenant.room_number,
+          dueDate: originalDueDate,
+          type: 'snoozed_reminder'
+        }
+      );
+
+      console.log(`✅ Reminder snoozed for ${tenant.name} until ${snoozeDate.toISOString()}`);
+    } catch (error) {
+      console.error('❌ Failed to snooze reminder:', error);
       throw error;
     }
   }
@@ -184,8 +240,8 @@ export class NotificationService {
         }
       }
 
-      // Update database
-      await Database.executeQuery(
+      // Update database using direct db access
+      await db.runAsync(
         `UPDATE reminders SET status = 'Cancelled' 
          WHERE tenant_id = ? AND status = 'Pending'`,
         [tenantId]
@@ -201,10 +257,10 @@ export class NotificationService {
     try {
       const today = new Date().toISOString().split('T')[0];
       
-      // Use a try-catch and ensure we get an array
+      // Get pending reminders using direct db access
       let pendingReminders: any[] = [];
       try {
-        const result = await Database.executeQuery(
+        const result = await db.getAllAsync(
           `SELECT r.*, t.name, t.room_number 
            FROM reminders r 
            JOIN tenants t ON r.tenant_id = t.tenant_id 
@@ -212,16 +268,7 @@ export class NotificationService {
           [`${today} 23:59:59`]
         );
         
-        // Handle different possible return types from executeQuery
-        if (Array.isArray(result)) {
-          pendingReminders = result;
-        } else if (result && typeof result === 'object') {
-          // If it returns an object with rows, extract them
-          pendingReminders = result.rows || result._array || [];
-        } else {
-          // If it's null or undefined, use empty array
-          pendingReminders = [];
-        }
+        pendingReminders = result || [];
       } catch (queryError) {
         console.error('❌ Query error in checkPendingReminders:', queryError);
         return;
@@ -231,9 +278,9 @@ export class NotificationService {
 
       for (const reminder of pendingReminders) {
         try {
-          await Database.executeQuery(
+          await db.runAsync(
             'UPDATE reminders SET status = ? WHERE reminder_id = ?',
-            ['Sent', reminder.reminder_id || reminder.id]
+            ['Sent', reminder.reminder_id]
           );
           console.log(`✅ Marked reminder as sent for ${reminder.name}`);
         } catch (updateError) {

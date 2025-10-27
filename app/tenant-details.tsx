@@ -1,44 +1,26 @@
-// app/tenant-details.tsx
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+// app/tenant-details.tsx - WITH AUTO-REFRESH
+import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useDatabase } from '../hooks/use-db';
-import { Tenant, Payment } from '../libs/types';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useAutoRefresh, useDatabase } from '../hooks/use-db';
+import { Payment, Tenant } from '../libs/types';
 
 export default function TenantDetails() {
   const { tenantId } = useLocalSearchParams();
   const router = useRouter();
-  const { isInitialized, getTenant, getPaymentHistory } = useDatabase();
+  const { isInitialized, getTenant, getPaymentHistory, deleteTenant } = useDatabase();
   
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const handleCreateReminder = async () => {
-    try {
-      const { NotificationService } = await import('../services/notifications');
-      
-      const lastPayment = payments[0];
-      const nextDueDate = lastPayment?.next_due_date || 
-        new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0];
-      
-      await NotificationService.createReminder(
-        parseInt(tenantId as string),
-        nextDueDate,
-        `Manual reminder for ${tenant?.name}`
-      );
-      
-      Alert.alert('Success', 'Reminder created successfully!');
-    } catch (error) {
-      console.error('Failed to create reminder:', error);
-      Alert.alert('Error', 'Failed to create reminder');
-    }
-  };
-
-  const loadTenantData = async () => {
+  const loadTenantData = useCallback(async () => {
     if (!tenantId || !isInitialized) return;
     
     try {
+      console.log('🔄 Tenant Details: Loading data...');
+      setLoading(true);
       const tenantData = await getTenant(parseInt(tenantId as string));
       setTenant(tenantData);
 
@@ -46,17 +28,58 @@ export default function TenantDetails() {
         const paymentData = await getPaymentHistory(tenantData.tenant_id);
         setPayments(paymentData);
       }
+      console.log('✅ Tenant Details: Data loaded');
     } catch (error) {
       console.error('Failed to load tenant data:', error);
       Alert.alert('Error', 'Failed to load tenant details');
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenantId, isInitialized, getTenant, getPaymentHistory]);
 
+  // Auto-refresh on database changes
+  const { isRefreshing, refresh } = useAutoRefresh(loadTenantData, [
+    'tenant_updated',
+    'payment_recorded'
+  ]);
+
+  // Initial load
   useEffect(() => {
     loadTenantData();
-  }, [tenantId, isInitialized]);
+  }, [loadTenantData]);
+
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('🎯 Tenant Details: Screen focused, refreshing...');
+      loadTenantData();
+    }, [loadTenantData])
+  );
+
+  const handleDeleteTenant = () => {
+    Alert.alert(
+      'Delete Tenant',
+      `Are you sure you want to delete ${tenant?.name}? This will delete all payment records and reminders.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteTenant(tenant!.tenant_id);
+              Alert.alert('Success', 'Tenant deleted successfully', [
+                { text: 'OK', onPress: () => router.back() }
+              ]);
+            } catch (error) {
+              console.error('Failed to delete tenant:', error);
+              Alert.alert('Error', 'Failed to delete tenant');
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -71,7 +94,7 @@ export default function TenantDetails() {
     router.push(`/record-payment?tenantId=${tenantId}`);
   };
 
-  if (loading) {
+  if (loading && !tenant) {
     return (
       <View style={styles.centerContainer}>
         <Text>Loading tenant details...</Text>
@@ -88,7 +111,19 @@ export default function TenantDetails() {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={refresh}
+          colors={['#007AFF']}
+          tintColor="#007AFF"
+        />
+      }
+    >
+      <Text style={styles.pullText}>Pull down to refresh</Text>
+      
       {/* Header Card */}
       <View style={styles.headerCard}>
         <View style={styles.tenantHeader}>
@@ -144,43 +179,107 @@ export default function TenantDetails() {
         >
           <Text style={styles.primaryButtonText}>Record Payment</Text>
         </TouchableOpacity>
-{/* 
+
         <TouchableOpacity
-          onPress={handleCreateReminder}
+          onPress={() => router.push(`/edit-tenant?tenantId=${tenantId}`)}
           style={styles.secondaryButton}
         >
-          <Text style={styles.secondaryButtonText}>Create Reminder</Text>
-        </TouchableOpacity> */}
+          <Text style={styles.secondaryButtonText}>Edit Tenant</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={handleDeleteTenant}
+          style={styles.deleteButton}
+        >
+          <Text style={styles.deleteButtonText}>Delete Tenant</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Payment History */}
       <View style={styles.paymentSection}>
         <Text style={styles.sectionTitle}>Payment History</Text>
-        
         {payments.length === 0 ? (
-          <Text style={styles.emptyText}>No payments recorded yet</Text>
+          <Text style={styles.emptyText}>No payment records yet</Text>
         ) : (
-          payments.map(payment => (
-            <View key={payment.payment_id} style={styles.paymentItem}>
-              <View style={styles.paymentHeader}>
-                <Text style={styles.paymentAmount}>{payment.amount_paid} UGX</Text>
-                <Text style={styles.paymentDate}>
-                  {new Date(payment.payment_date).toLocaleDateString()}
-                </Text>
+          payments.map(payment => {
+            const coveredAmount = payment.months_paid_for * tenant.monthly_rent;
+            const creditAmount = payment.amount_paid - coveredAmount;
+            const hasCredit = creditAmount > 0;
+            
+            return (
+              <View key={payment.payment_id} style={styles.paymentItem}>
+                <View style={styles.paymentHeader}>
+                  <View>
+                    <Text style={styles.paymentAmount}>
+                      {payment.amount_paid.toLocaleString()} UGX
+                    </Text>
+                    <Text style={styles.paymentMethod}>
+                      {payment.payment_method} • {new Date(payment.payment_date).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <View style={[
+                    styles.monthsBadge,
+                    { backgroundColor: payment.months_paid_for > 0 ? '#10B98120' : '#F59E0B20' }
+                  ]}>
+                    <Text style={[
+                      styles.monthsBadgeText,
+                      { color: payment.months_paid_for > 0 ? '#10B981' : '#F59E0B' }
+                    ]}>
+                      {payment.months_paid_for} {payment.months_paid_for === 1 ? 'month' : 'months'}
+                    </Text>
+                  </View>
+                </View>
+                
+                {/* Coverage Breakdown */}
+                <View style={styles.coverageBreakdown}>
+                  <View style={styles.breakdownRow}>
+                    <Text style={styles.breakdownLabel}>Coverage:</Text>
+                    <Text style={styles.breakdownValue}>
+                      {payment.months_paid_for} month{payment.months_paid_for !== 1 ? 's' : ''} × {tenant.monthly_rent.toLocaleString()} UGX
+                    </Text>
+                    <Text style={styles.breakdownAmount}>
+                      {coveredAmount.toLocaleString()} UGX
+                    </Text>
+                  </View>
+                  
+                  {hasCredit && (
+                    <View style={styles.breakdownRow}>
+                      <Text style={styles.breakdownLabel}>Credit:</Text>
+                      <Text style={styles.breakdownValue}>Remaining balance</Text>
+                      <Text style={[styles.breakdownAmount, styles.creditAmount]}>
+                        +{creditAmount.toLocaleString()} UGX
+                      </Text>
+                    </View>
+                  )}
+                  
+                  <View style={[styles.breakdownRow, styles.totalRow]}>
+                    <Text style={styles.breakdownLabel}>Total Paid:</Text>
+                    <Text style={styles.breakdownValue}></Text>
+                    <Text style={[styles.breakdownAmount, styles.totalAmount]}>
+                      {payment.amount_paid.toLocaleString()} UGX
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.paymentFooter}>
+                  <Text style={styles.nextDue}>
+                    Next due: <Text style={styles.nextDueDate}>
+                      {new Date(payment.next_due_date).toLocaleDateString()}
+                    </Text>
+                  </Text>
+                  {hasCredit && (
+                    <Text style={styles.creditNote}>
+                      💰 {creditAmount.toLocaleString()} UGX credit for next payment
+                    </Text>
+                  )}
+                </View>
+                
+                {payment.notes ? (
+                  <Text style={styles.paymentNotes}>📝 {payment.notes}</Text>
+                ) : null}
               </View>
-              <View style={styles.paymentDetails}>
-                <Text style={styles.paymentMethod}>
-                  {payment.payment_method} • {payment.months_paid_for} months
-                </Text>
-                <Text style={styles.nextDue}>
-                  Next due: {new Date(payment.next_due_date).toLocaleDateString()}
-                </Text>
-              </View>
-              {payment.notes ? (
-                <Text style={styles.paymentNotes}>{payment.notes}</Text>
-              ) : null}
-            </View>
-          ))
+            );
+          })
         )}
       </View>
     </ScrollView>
@@ -196,6 +295,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  pullText: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    paddingVertical: 8,
   },
   headerCard: {
     backgroundColor: '#FFFFFF',
@@ -274,6 +379,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#3B82F6',
     borderRadius: 8,
     padding: 16,
+    marginBottom: 12,
     alignItems: 'center',
   },
   primaryButtonText: {
@@ -283,6 +389,19 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  deleteButton: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    color: '#DC2626',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -318,22 +437,87 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1F2937',
   },
-  paymentDate: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  paymentDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
   paymentMethod: {
     fontSize: 14,
     color: '#6B7280',
   },
+  monthsBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  monthsBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  coverageBreakdown: {
+    backgroundColor: '#F8FAFC',
+    padding: 12,
+    borderRadius: 8,
+    marginVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  totalRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    paddingTop: 6,
+    marginTop: 2,
+  },
+  breakdownLabel: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '500',
+    width: '25%',
+  },
+  breakdownValue: {
+    fontSize: 13,
+    color: '#374151',
+    flex: 1,
+    marginLeft: 8,
+  },
+  breakdownAmount: {
+    fontSize: 13,
+    color: '#1F2937',
+    fontWeight: '600',
+    width: '35%',
+    textAlign: 'right',
+  },
+  creditAmount: {
+    color: '#10B981',
+  },
+  totalAmount: {
+    color: '#1F2937',
+    fontSize: 14,
+  },
+  paymentFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
   nextDue: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  nextDueDate: {
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  creditNote: {
+    fontSize: 12,
+    color: '#10B981',
+    fontWeight: '500',
+    backgroundColor: '#10B98120',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   paymentNotes: {
     fontSize: 14,
@@ -342,4 +526,3 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
 });
-

@@ -1,0 +1,130 @@
+🔄 PROBLEM: MANUAL APP REFRESH REQUIRED
+THE PROBLEM:
+When users perform actions like adding tenants or recording payments, the changes don't appear immediately in the app. Users have to close and reopen the entire application to see updated data, which is inconvenient and creates a poor user experience.
+
+WHERE IT HAPPENS:
+Adding new tenants
+
+Recording payments
+
+Editing tenant information
+
+Any data changes that should update lists or statistics
+
+ROOT CAUSE:
+The app screens load data only once when they open, but don't automatically refresh when the underlying database changes.
+
+🛠️ SOLUTIONS NEEDED:
+1. AUTOMATIC SCREEN REFRESHES
+Refresh tenant list immediately after adding/editing tenants
+
+Update dashboard statistics after any financial changes
+
+Refresh tenant details after recording payments
+
+Update analytics after data modifications
+
+2. PULL-TO-REFRESH FEATURE
+Add pull-down to refresh on all list screens
+
+Allow manual refresh when users want latest data
+
+Show loading indicators during refresh
+
+3. NAVIGATION-AWARE UPDATES
+Automatically refresh data when returning to a screen
+
+Update screens when they come back into view
+
+Ensure data is current after any user action
+
+4. BETTER USER FEEDBACK
+Show success messages after actions
+
+Display loading states during operations
+
+Provide clear indication when data is updating
+
+🎯 END GOAL:
+Users should see all their changes immediately without ever needing to close and reopen the app. The app should feel responsive, live, and always show current data.
+
+Priority: High - This directly impacts user satisfaction and app usability.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+⚠️ SHOULD FIX BEFORE RELEASE:
+Payment Validation - Prevent invalid amounts
+
+Date Handling - Ensure proper date calculations
+
+Error Handling - Better user feedback
+
+
+
+
+❌ MISSING/INCOMPLETE FEATATURES
+
+
+3. Enhanced Reminder Management
+❌ Manual reminder creation from tenant details
+
+❌ Reminder status updates (acknowledged, cancelled)
+
+❌ Swipe actions on reminders list
+
+4. Payment Management
+❌ Edit/Delete payment records
+
+❌ Payment validation (prevent overpayment logic)
+
+5. Data Import Validation
+❌ Better validation for imported backup files
+
+❌ Conflict resolution for duplicate data
+
+6. UI/UX Enhancements
+❌ Color-coded status throughout the app (currently only in some places)
+
+❌ Swipe actions on tenant lists
+
+❌ Pull-to-refresh on all lists
+
+❌ Loading states and better error handling
+
+7. Settings Features
+❌ Theme implementation (Light/Dark/Auto)
+
+❌ Currency formatting throughout the app
+
+❌ Data backup path configuration
+
+8. Analytics Enhancements
+❌ More detailed charts and reports
+
+❌ Export analytics data
+
+❌ Monthly collection vs expected comparison
+
+9. Edge Case Handling
+❌ Tenant pays before reminder → reminder cancellation logic
+
+❌ Payment validation (amount vs monthly rent)
+
+❌ Date validation and formatting

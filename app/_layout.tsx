@@ -1,37 +1,54 @@
 // app/_layout.tsx
-import { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import * as NavigationBar from 'expo-navigation-bar';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import { Alert } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NotificationService } from '../services/notifications';
 
+
 export default function RootLayout() {
+  const router = useRouter();
+
   useEffect(() => {
-    // Setup notification handler
-    const removeHandler = NotificationService.setupNotificationResponseHandler((response) => {
+    const removeHandler = NotificationService.setupNotificationResponseHandler(async (response) => {
       const { actionIdentifier, notification } = response;
-      const { tenantId, tenantName } = notification.request.content.data;
+      const { tenantId, tenantName, dueDate } = notification.request.content.data;
 
       console.log('Notification action:', actionIdentifier, 'for tenant:', tenantName);
 
-      // Handle different actions
       switch (actionIdentifier) {
         case 'MARK_PAID':
           // Navigate to record payment screen
-          console.log('Navigate to record payment for:', tenantId);
+          router.push(`/record-payment?tenantId=${tenantId}`);
           break;
+          
         case 'SNOOZE_DAY':
-          // Snooze logic would go here
-          console.log('Snooze reminder for:', tenantName);
+          // Snooze for 1 day
+          try {
+            await NotificationService.snoozeReminder(tenantId, dueDate, 1);
+            Alert.alert('✅ Snoozed', `Reminder for ${tenantName} snoozed for 1 day`);
+          } catch (error) {
+            console.error('Failed to snooze:', error);
+            Alert.alert('Error', 'Failed to snooze reminder');
+          }
           break;
+          
         default:
-          // Default tap action
-          console.log('Notification tapped for:', tenantName);
+          // Default tap - go to tenant details
+          router.push(`/tenant-details?tenantId=${tenantId}`);
           break;
       }
     });
 
+      // Set navigation bar color (Android)
+    NavigationBar.setBackgroundColorAsync('#FFFFFF');
+    NavigationBar.setButtonStyleAsync('dark');
+
     return removeHandler;
+
+
   }, []);
 
   return (
@@ -40,8 +57,9 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="tenant-details" options={{ title: 'Tenant Details' }} />
-        <Stack.Screen name="record-payment" options={{ title: 'Record Payment' }} />
+        <Stack.Screen name="record-payment" options={{ title: 'Record Payment' }}  />
         <Stack.Screen name="add-tenant" options={{ title: 'Add Tenant' }} />
+        <Stack.Screen name="edit-tenant" options={{ title: 'Edit Tenant' }} />
       </Stack>
     </SafeAreaProvider>
   );
