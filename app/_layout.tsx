@@ -1,15 +1,23 @@
 // app/_layout.tsx
 
+import * as NavigationBar from 'expo-navigation-bar';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NotificationService } from '../services/notifications';
 
-
 export default function RootLayout() {
   const router = useRouter();
+
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      
+      NavigationBar.setBackgroundColorAsync('#FFFFFF');
+      NavigationBar.setButtonStyleAsync('dark'); 
+    }
+  }, []);
 
   useEffect(() => {
   const removeHandler = NotificationService.setupNotificationResponseHandler(async (response) => {
@@ -52,7 +60,10 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="auto" />
+      <StatusBar style="dark" 
+       
+        translucent={false} 
+        />
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="tenant-details" options={{ title: 'Tenant Details' }} />
@@ -78,3 +89,25 @@ export default function RootLayout() {
 // eas build --profile development --platform android
 
 // # Install on your device and test!
+
+
+
+
+// well , i already built for dev, but when i add this '// app/_layout.tsx
+// import { useEffect } from 'react';
+// import { Platform, Appearance } from 'react-native';
+// import * as NavigationBar from 'expo-navigation-bar';
+
+// export default function RootLayout() {
+//   useEffect(() => {
+//     if (Platform.OS === 'android') {
+//       // This ONLY works in development builds
+//       NavigationBar.setBackgroundColorAsync('#FFFFFF');
+//       NavigationBar.setButtonStyleAsync('dark'); // or 'light'
+//     }
+//   }, []);
+
+//   return (
+//     // Your app content
+//   );
+// }' the app will fail . i had tried it before . for the status bar, it worked without needing any builds
