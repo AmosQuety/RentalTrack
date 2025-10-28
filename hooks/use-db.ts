@@ -45,7 +45,12 @@ export const useDatabase = () => {
       try {
         await initializeDatabase();
         await NotificationService.initialize();
+        
+        // NEW: Update tenant statuses on app start
+        await Database.updateAllTenantStatuses();
         await NotificationService.checkPendingReminders();
+        
+
         setIsInitialized(true);
       } catch (err) {
         console.error('Failed to initialize app:', err);
@@ -144,3 +149,14 @@ export const useAutoRefresh = (
 
   return { isRefreshing, refresh };
 };
+
+// hooks/use-db.ts
+// Logic:
+// Centralizes database initialization.
+// Provides isInitialized state.
+// DatabaseEventEmitter: This is an excellent pattern for reactive updates across your app without complex global state. Very good job implementing this.
+// useAutoRefresh: This hook beautifully leverages the DatabaseEventEmitter to automatically reload data in components when relevant database events occur. This is a robust solution for ensuring data freshness.
+// Improvements for Production:
+// Error Display: setError is stored but not displayed in the useDatabase hook itself. Consider how this error state would be presented to the user (e.g., a global error banner).
+// Singleton Pattern for dbEvents: dbEvents is instantiated globally. This is appropriate for a singleton event bus.
+// useCallback for DB calls: Wrapping the mutating DB functions (addTenant, updateTenant, deleteTenant, recordPayment, updateSettings) in useCallback is a good practice as it prevents unnecessary re-creations of these functions and potentially unnecessary re-renders in components that depend on them.

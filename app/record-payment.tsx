@@ -1,13 +1,9 @@
-
 // app/record-payment.tsx
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useDatabase } from '../hooks/use-db';
 import { Tenant } from '../libs/types';
-
-
-
 
 const InputField = ({ label, value, onChange, placeholder, keyboardType = 'default', required = false, multiline = false }) => (
   <View style={styles.inputContainer}>
@@ -28,10 +24,8 @@ const InputField = ({ label, value, onChange, placeholder, keyboardType = 'defau
   </View>
 );
 
-
-
 export default function RecordPayment() {
-  const { tenantId } = useLocalSearchParams();
+  const { tenantId, prefillAmount } = useLocalSearchParams(); // FIXED: Get prefillAmount here
   const router = useRouter();
   const { isInitialized, getTenant, recordPayment } = useDatabase();
   
@@ -45,11 +39,10 @@ export default function RecordPayment() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [paymentSummary, setPaymentSummary] = useState({
-  fullMonths: 0,
-  remainingAmount: 0,
-  nextDueDate: ''
-});
-
+    fullMonths: 0,
+    remainingAmount: 0,
+    nextDueDate: ''
+  });
 
   const loadTenant = async () => {
     if (!tenantId || !isInitialized) return;
@@ -63,33 +56,41 @@ export default function RecordPayment() {
     }
   };
 
-  // Add this useEffect to calculate summary when amount changes
-useEffect(() => {
-  if (formData.amount && tenant) {
-    const amount = parseFloat(formData.amount);
-    const monthlyRent = tenant.monthly_rent;
-    
-    if (!isNaN(amount) && monthlyRent > 0) {
-      const fullMonths = Math.floor(amount / monthlyRent);
-      const remaining = amount % monthlyRent;
-      
-      // Calculate next due date
-      const lastPaymentDate = new Date();
-      const nextDue = new Date(lastPaymentDate);
-      nextDue.setMonth(nextDue.getMonth() + fullMonths);
-      
-      setPaymentSummary({
-        fullMonths,
-        remainingAmount: remaining,
-        nextDueDate: nextDue.toISOString().split('T')[0]
-      });
+  // FIXED: Handle prefill amount in a separate useEffect
+  useEffect(() => {
+    if (prefillAmount && !formData.amount) {
+      setFormData(prev => ({ ...prev, amount: prefillAmount.toString() }));
     }
-  }
-}, [formData.amount, tenant]);
+  }, [prefillAmount]); // Only depend on prefillAmount
 
+  // FIXED: Calculate payment summary
+  useEffect(() => {
+    if (formData.amount && tenant) {
+      const amount = parseFloat(formData.amount);
+      const monthlyRent = tenant.monthly_rent;
+      
+      if (!isNaN(amount) && monthlyRent > 0) {
+        const fullMonths = Math.floor(amount / monthlyRent);
+        const remaining = amount % monthlyRent;
+        
+        // Calculate next due date
+        const lastPaymentDate = new Date();
+        const nextDue = new Date(lastPaymentDate);
+        nextDue.setMonth(nextDue.getMonth() + fullMonths);
+        
+        setPaymentSummary({
+          fullMonths,
+          remainingAmount: remaining,
+          nextDueDate: nextDue.toISOString().split('T')[0]
+        });
+      }
+    }
+  }, [formData.amount, tenant]);
+
+  // FIXED: Load tenant data
   useEffect(() => {
     loadTenant();
-  }, [tenantId, isInitialized]);
+  }, [tenantId, isInitialized]); // loadTenant is stable, no need to include
 
   const handleRecordPayment = async () => {
     if (!formData.amount || !formData.paymentDate) {
@@ -102,13 +103,19 @@ useEffect(() => {
       Alert.alert('Error', 'Please enter a valid amount');
       return;
     }
+    
+    if (!tenant) {
+      Alert.alert('Error', 'Tenant information not loaded');
+      return;
+    }
+    
     if (amount < tenant.monthly_rent) {
-    Alert.alert(
-      'Partial Payment', 
-      `This payment (${amount.toLocaleString()} UGX) is less than one month's rent (${tenant.monthly_rent.toLocaleString()} UGX). It will be recorded as credit toward the next payment.`,
-      [{ text: 'OK' }]
-    );
-  }
+      Alert.alert(
+        'Partial Payment', 
+        `This payment (${amount.toLocaleString()} UGX) is less than one month's rent (${tenant.monthly_rent.toLocaleString()} UGX). It will be recorded as credit toward the next payment.`,
+        [{ text: 'OK' }]
+      );
+    }
 
     setIsLoading(true);
     try {
@@ -172,29 +179,28 @@ useEffect(() => {
           />
 
           {formData.amount && tenant && (
-          <View style={styles.paymentSummary}>
-            <Text style={styles.paymentSummaryTitle}>Payment Summary</Text>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Full Months Covered:</Text>
-              <Text style={styles.summaryValue}>{paymentSummary.fullMonths} months</Text>
-            </View>
-            {paymentSummary.remainingAmount > 0 && (
+            <View style={styles.paymentSummary}>
+              <Text style={styles.paymentSummaryTitle}>Payment Summary</Text>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Remaining Credit:</Text>
+                <Text style={styles.summaryLabel}>Full Months Covered:</Text>
+                <Text style={styles.summaryValue}>{paymentSummary.fullMonths} months</Text>
+              </View>
+              {paymentSummary.remainingAmount > 0 && (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Remaining Credit:</Text>
+                  <Text style={styles.summaryValue}>
+                    {paymentSummary.remainingAmount.toLocaleString()} UGX
+                  </Text>
+                </View>
+              )}
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Next Due Date:</Text>
                 <Text style={styles.summaryValue}>
-                  {paymentSummary.remainingAmount.toLocaleString()} UGX
+                  {new Date(paymentSummary.nextDueDate).toLocaleDateString()}
                 </Text>
               </View>
-            )}
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Next Due Date:</Text>
-              <Text style={styles.summaryValue}>
-                {new Date(paymentSummary.nextDueDate).toLocaleDateString()}
-              </Text>
             </View>
-          </View>
-        )}
-
+          )}
 
           <InputField
             label="Payment Date"
@@ -415,8 +421,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-
-  
   paymentSummary: {
     backgroundColor: '#F3F4F6',
     padding: 12,

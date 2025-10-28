@@ -1,9 +1,25 @@
 // db/database.ts
+import { addMonths, format, parseISO } from 'date-fns';
 import * as SQLite from 'expo-sqlite';
 import { Payment, Reminder, Settings, Tenant } from '../libs/types';
 
 // Open database connection
 const db = SQLite.openDatabaseSync('RentReminderDB');
+
+// Add this at the top of database.ts
+class RoomAlreadyExistsError extends Error {
+  constructor(roomNumber: string) {
+    super(`Room "${roomNumber}" is already occupied by another tenant. Please choose a different room.`);
+    this.name = 'RoomAlreadyExistsError';
+  }
+}
+
+class DatabaseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DatabaseError';
+  }
+}
 
 export const initializeDatabase = async (): Promise<void> => {
   try {
@@ -12,17 +28,17 @@ export const initializeDatabase = async (): Promise<void> => {
 
     // Tenants Table
     await db.execAsync(`
-      CREATE TABLE IF NOT EXISTS tenants (
-        tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        phone TEXT,
-        room_number TEXT NOT NULL,
-        start_date TEXT NOT NULL,
-        monthly_rent REAL NOT NULL,
-        status TEXT DEFAULT 'Due Soon',
-        notes TEXT,
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
+       CREATE TABLE IF NOT EXISTS tenants (
+    tenant_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    phone TEXT,
+    room_number TEXT NOT NULL UNIQUE,  -- ADD UNIQUE CONSTRAINT
+    start_date TEXT NOT NULL,
+    monthly_rent REAL NOT NULL,
+    status TEXT DEFAULT 'Due Soon',
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
       );
     `);
 
@@ -135,6 +151,26 @@ export const Database = {
     }
   },
 
+  // Add this function to the Database object in database.ts
+checkRoomExists: async (roomNumber: string, excludeTenantId?: number): Promise<boolean> => {
+  try {
+    let query = 'SELECT COUNT(*) as count FROM tenants WHERE room_number = ?';
+    const params = [roomNumber.trim()];
+    
+    if (excludeTenantId) {
+      query += ' AND tenant_id != ?';
+      params.push(excludeTenantId);
+    }
+    
+    const result = await db.getFirstAsync<{ count: number }>(query, params);
+    return (result?.count || 0) > 0;
+  } catch (error) {
+    console.error('❌ Error checking room availabitility:', error);
+    throw new DatabaseError('Unable to verify room availability. Please try again.');
+    
+  }
+},
+
   // Add new tenant
   addTenant: async (tenant: {
     name: string;
@@ -145,6 +181,13 @@ export const Database = {
     notes?: string;
   }): Promise<number> => {
     try {
+      // Check if room already exists
+    const roomExists = await Database.checkRoomExists(tenant.roomNumber);
+    if (roomExists) {
+      throw new RoomAlreadyExistsError(tenant.roomNumber);
+      
+    }
+
       // Insert tenant
       const result = await db.runAsync(
         `INSERT INTO tenants (name, phone, room_number, start_date, monthly_rent, notes) 
@@ -179,8 +222,12 @@ export const Database = {
       return tenantId;
     } catch (error) {
       console.error('❌ Error adding tenant:', error);
+      // Re-throw our custom errors, wrap others in user-friendly messages
+      if (error instanceof RoomAlreadyExistsError || error instanceof DatabaseError){
       throw error;
+      }
     }
+    throw new DatabaseError('Failed to add tenant. Please check your information and try again.');
   },
 
   // Update tenant
@@ -193,6 +240,14 @@ updateTenant: async (tenantId: number, updates: {
   notes?: string;
 }): Promise<void> => {
   try {
+      // Check if room already exists (excluding current tenant)
+    const roomExists = await Database.checkRoomExists(updates.roomNumber, tenantId);
+    if (roomExists) {
+       
+      throw new RoomAlreadyExistsError(updates.roomNumber);
+    }
+
+
     await db.runAsync(
       `UPDATE tenants 
        SET name = ?, phone = ?, room_number = ?, start_date = ?, monthly_rent = ?, notes = ?, updated_at = datetime('now')
@@ -211,9 +266,58 @@ updateTenant: async (tenantId: number, updates: {
     console.log(`✅ Updated tenant ${tenantId}`);
   } catch (error) {
     console.error('❌ Error updating tenant:', error);
+    if (error instanceof RoomAlreadyExistsError || error instanceof DatabaseError) {
+
     throw error;
   }
+    throw new DatabaseError('Failed to update tenant. Please check your information and try again.');
+  }
 },
+
+updateAllTenantStatuses: async (): Promise<void> => {
+    try {
+      console.log('🔄 Updating all tenant statuses...');
+      const tenants = await db.getAllAsync<Tenant>('SELECT * FROM tenants');
+      
+      let updatedCount = 0;
+      
+      for (const tenant of tenants) {
+        // Get the most recent payment's next_due_date
+        const lastPayment = await db.getFirstAsync<{ next_due_date: string }>(
+          'SELECT next_due_date FROM payments WHERE tenant_id = ? ORDER BY payment_date DESC LIMIT 1',
+          [tenant.tenant_id]
+        );
+        
+        // Use last payment's next_due_date, or fallback to start_date + 1 month if no payments
+        let nextDueDate: string;
+        if (lastPayment?.next_due_date) {
+          nextDueDate = lastPayment.next_due_date;
+        } else {
+          // For tenants with no payments yet, calculate from start_date
+          const startDate = new Date(tenant.start_date);
+          startDate.setMonth(startDate.getMonth() + 1);
+          nextDueDate = startDate.toISOString().split('T')[0];
+        }
+        
+        const newStatus = calculateTenantStatus(nextDueDate);
+        
+        // Update if status changed
+        if (newStatus !== tenant.status) {
+          await db.runAsync(
+            'UPDATE tenants SET status = ?, updated_at = datetime("now") WHERE tenant_id = ?',
+            [newStatus, tenant.tenant_id]
+          );
+          updatedCount++;
+          console.log(`✅ Updated ${tenant.name} from ${tenant.status} to ${newStatus}`);
+        }
+      }
+      
+      console.log(`✅ Tenant status update complete: ${updatedCount} tenants updated`);
+    } catch (error) {
+      console.error('❌ Error updating tenant statuses:', error);
+      throw error;
+    }
+  },
 
   
   // Record payment
@@ -226,8 +330,8 @@ updateTenant: async (tenantId: number, updates: {
   }): Promise<number> => {
   try {
     // Get tenant's monthly rent
-    const tenant = await db.getFirstAsync<{ monthly_rent: number }>(
-      'SELECT monthly_rent FROM tenants WHERE tenant_id = ?',
+    const tenant = await db.getFirstAsync<{ monthly_rent: number, start_date:string }>(
+      'SELECT monthly_rent, start_date FROM tenants WHERE tenant_id = ?',
       [payment.tenantId]
     );
 
@@ -246,18 +350,16 @@ updateTenant: async (tenantId: number, updates: {
     );
 
     let baseDate: Date;
-    if (lastPayment) {
+    if (lastPayment?.next_due_date) {
       baseDate = new Date(lastPayment.next_due_date);
     } else {
-      // For first payment, use the tenant's start date
-      const tenantData = await db.getFirstAsync<{ start_date: string }>(
-        'SELECT start_date FROM tenants WHERE tenant_id = ?',
-        [payment.tenantId]
-      );
-      baseDate = new Date(tenantData!.start_date);
+        // For first payment, use the tenant's start date
+      baseDate = parseISO(tenant.start_date);
     }
 
-    const nextDueDate = new Date(baseDate);
+     // FIXED: Use date-fns for correct month calculations
+    const nextDueDate = addMonths(baseDate, fullMonthsCovered);
+
     nextDueDate.setMonth(nextDueDate.getMonth() + fullMonthsCovered);
 
     // Insert payment
@@ -267,26 +369,20 @@ updateTenant: async (tenantId: number, updates: {
       [
         payment.tenantId,
         payment.amountPaid,
-        fullMonthsCovered, // Store full months only
+        fullMonthsCovered,
         payment.paymentDate,
-        nextDueDate.toISOString().split('T')[0],
+        format(nextDueDate, 'yyyy-MM-dd'), 
         payment.paymentMethod,
         payment.notes || ''
       ]
     );
 
     // Update tenant status
-    const status = calculateTenantStatus(nextDueDate.toISOString().split('T')[0]);
+   const status = calculateTenantStatus(format(nextDueDate, 'yyyy-MM-dd'));
     await db.runAsync(
       'UPDATE tenants SET status = ?, updated_at = datetime("now") WHERE tenant_id = ?',
       [status, payment.tenantId]
     );
-
-    // Handle remaining amount (credit for next month)
-    if (remainingAmount > 0) {
-      console.log(`💰 Credit of ${remainingAmount} UGX will apply to next payment`);
-      // You could store this in a separate credits table or add to notes
-    }
 
     // Cancel existing reminders and create new one
     try {
@@ -294,7 +390,7 @@ updateTenant: async (tenantId: number, updates: {
       await NotificationService.cancelReminders(payment.tenantId);
       await NotificationService.createReminder(
         payment.tenantId, 
-        nextDueDate.toISOString().split('T')[0]
+         format(nextDueDate, 'yyyy-MM-dd')
       );
     } catch (notifError) {
       console.warn('⚠️ Failed to update reminders:', notifError);
@@ -496,3 +592,31 @@ updateTenant: async (tenantId: number, updates: {
 };
 
 export default Database;
+
+// db/database.ts
+// Core Rent Logic (where it primarily resides):
+// initializeDatabase: Well-structured, creates tables, indexes, and sets default settings. Good use of PRAGMA foreign_keys = ON;.
+// RoomAlreadyExistsError / DatabaseError: Excellent! Custom error classes are a huge improvement for specific error handling and clearer error messages to the user.
+// checkRoomExists: Good validation to prevent duplicate room numbers.
+// addTenant & updateTenant: Correctly use checkRoomExists.
+// calculateTenantStatus: This is the heart of your tenant status logic.
+// Issue: daysUntilDue <= 3 for 'Due Soon' and daysUntilDue < 0 for 'Overdue'. This logic defines the payment status and needs to be robust.
+// Improvement: The status is based on nextDueDate. This nextDueDate is only explicitly updated in recordPayment. What happens if no payment is made for a long time? The status will remain Due Soon or Overdue, but the next_due_date in the payments table (which is what calculateTenantStatus uses as nextDueDate implicitly, via the most recent payment) won't naturally advance.
+// CRITICAL RENT LOGIC FLAW: The status in the tenants table is only explicitly updated in recordPayment. If no payment is made, the status will not automatically change from 'Paid' to 'Due Soon' to 'Overdue'. There needs to be a background task or periodic check that updates tenant statuses based on their next_due_date and the current date. This is the most significant missing piece for production readiness in the rent logic.
+// Recommendation: Implement a background service (e.g., using expo-task-manager or a simpler useEffect with an interval in a main component, which triggers checkAndAdvanceTenantStatuses function in database.ts). This function would iterate through all tenants, re-calculate their status based on the current date and their latest next_due_date from payments, and update the tenants.status column.
+// recordPayment:
+// fullMonthsCovered: Math.floor(payment.amountPaid / tenant.monthly_rent) is correct for whole months.
+// remainingAmount: payment.amountPaid % tenant.monthly_rent is correct for credit.
+// baseDate for nextDueDate: This is crucial. It correctly picks the next_due_date from the last payment or the tenant's start date. This implies a rolling next_due_date based on payments, which is a common and usually desired behavior.
+// nextDueDate.setMonth(nextDueDate.getMonth() + fullMonthsCovered): This is the critical date calculation point. As mentioned above, using native Date.setMonth can lead to issues if the day of the month is greater than the number of days in the target month (e.g., Jan 31 + 1 month = March 2nd/3rd). Absolutely use a date library here for correctness.
+// remainingAmount > 0: Good log, but for production, you might want to explicitly store and track this "credit" for a tenant in a separate field or table, rather than just in notes or a console log. This allows proper accounting for partial payments.
+// Reminder handling: Correctly cancels old and creates new reminders.
+// getPaymentStats & getMonthlyTrend: Good analytical functions. Date range calculations are solid.
+// Improvements for Production:
+// Automated Status Updates (CRITICAL): As detailed above, implement a mechanism to periodically update tenants.status and generate reminders for overdue tenants, not just when a payment is recorded. This is the biggest gap in the rental lifecycle management.
+// Date Library: Replace all native Date object manipulations (especially setMonth, setDate) with date-fns or moment.js to avoid bugs.
+// Transaction Management: For recordPayment, which involves multiple db.runAsync calls (insert payment, update tenant status, cancel/create reminders), these operations should ideally be wrapped in a single database transaction. If any step fails, the entire transaction should roll back, ensuring data consistency. SQLite supports transactions (BEGIN TRANSACTION;, COMMIT;, ROLLBACK;).
+// Error Detail: When console.error('❌ Error getting tenants:', error); happens, it might be beneficial to log the full stack trace of the error in production.
+// Constants: status strings ('Paid', 'Due Soon', 'Overdue') should be defined as constants to prevent typos.
+// db.getAllAsync and db.getFirstAsync: These are good wrappers.
+// Type Safety: Explicitly typing the parameters and return values of all database functions (which you've mostly done) is crucial for maintainability.

@@ -10,10 +10,11 @@ const db = SQLite.openDatabaseSync('RentReminderDB');
 // Configure notification handler - UPDATED
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,  // NEW - Shows banner
+   shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowBanner: true,    // For when app is in foreground
+    shouldShowList: true,      // For notification center
   }),
 });
 
@@ -300,3 +301,22 @@ export class NotificationService {
     return () => subscription.remove();
   }
 }
+
+// services/notifications.ts
+// Logic:
+// Handles Expo notification setup, permissions, and scheduling.
+// Configures a notification category with actionable buttons ("Mark as Paid", "Snooze"). This is an advanced and very useful feature.
+// createReminder: Integrates with database settings to determine reminder date and message.
+// snoozeReminder: Excellent addition to handle snoozing directly from a notification.
+// cancelReminders: Good for cleaning up when a tenant is deleted or pays.
+// checkPendingReminders: Checks for overdue reminders in the database and marks them as 'Sent'.
+// Improvements for Production:
+// Actionable Notifications (CRITICAL):
+// You've set up the categories and actions, but the code to handle the response from these actions (Notifications.addNotificationResponseReceivedListener) is not shown in this file or elsewhere. This is the second biggest missing piece for production readiness.
+// When a user taps "Mark as Paid" or "Snooze 1 Day" from a notification, your app needs to receive this event and trigger the corresponding recordPayment or snoozeReminder logic. This typically involves navigating to a specific screen, pre-filling data, and then executing the database operation.
+// Foreground vs. Background Handling: Your Notifications.setNotificationHandler handles how notifications are presented when the app is in the foreground. You also need to consider how the app behaves when opened from a notification when it was killed or in the background. The setupNotificationResponseHandler is the right step, but its implementation needs to be present in your root app component.
+// Error Handling for scheduleNotification: The Alert.alert in __DEV__ is useful, but ensure robust logging and user feedback in production if notifications fail.
+// db.runAsync vs. Database.addReminder: You're directly using db.runAsync to insert reminders. While fine, if Database had a addReminder method that also emitted an event, it might be more consistent with the useDatabase hook pattern.
+// Time Zone Issues: new Date().toISOString() is fine for storing, but when scheduleNotification uses { date: reminderDate }, ensure reminderDate is correct in the user's local time zone for scheduling purposes. Expo Notifications handles this fairly well, but be aware.
+// Recurring Reminders: Your current system creates one-off reminders for the next due date. A robust system might need to manage recurring reminders or a chain of reminders more explicitly.
+// Notification Content: Make sure notification messages are clear and contain all necessary information.

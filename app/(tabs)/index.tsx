@@ -314,3 +314,17 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
 });
+
+// app/(tabs)/index.tsx (Dashboard)
+// Logic:
+// The loadData function correctly fetches tenants and payment stats.
+// calculateTenantStatus is missing from this file, but you have getStatusColor which uses tenant.status. This status needs to be consistently maintained in the database.
+// formatCurrency is good, but hardcoded to 'en-UG' and 'UGX'. This should ideally come from user settings.
+// The stats cards are well-structured.
+// Improvements for Production:
+// Data Consistency: The tenant.status is determined in database.ts. Ensure this status is updated reliably when payments are recorded or due dates pass. You've correctly added auto-refresh on payment_recorded, tenant_updated, etc., which is good.
+// Currency: Retrieve currency from settings, not hardcode UGX.
+// Dashboard Widgets: For a real dashboard, users might want to customize widgets, add charts (e.g., react-native-chart-kit), or see more detailed breakdowns (e.g., rent collection rate, average occupancy).
+// Empty States: Good empty state for "No tenants yet".
+// useFocusEffect: It's good you're reloading data on focus, but be mindful of performance for very frequent navigation if loadData is expensive.
+// Code Duplication: getStatusColor is duplicated in other files. It should be extracted into a utility file (e.g., utils/styles.ts or utils/helpers.ts).

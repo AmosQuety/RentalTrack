@@ -1,6 +1,6 @@
 // app/(tabs)/reminders.tsx
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, StyleSheet } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useDatabase } from '../../hooks/use-db';
 import { Reminder } from '../../libs/types';
 
@@ -197,3 +197,15 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
 });
+
+// app/(tabs)/reminders.tsx
+// Logic:
+// Fetches upcoming reminders based on a daysAhead parameter.
+// Displays tenant name, room, message, and dates.
+// Improvements for Production:
+// Reminder Actions: The notification service schedules actions like "Mark Paid" or "Snooze". This screen should provide similar functionality to act on reminders directly (e.g., mark as paid from here, snooze from here, or dismiss a reminder).
+// Date Display: toLocaleDateString() is locale-dependent. Ensure you're showing dates in a format preferred by the user (from settings or device locale).
+// Filtering/Sorting: For many reminders, you'd want options to filter by status, sort by date, or show all.
+// Pagination/Load More: If there could be many reminders, implement pagination.
+// Empty State: Clear empty state message.
+// getStatusColor: Again, extract this to a shared utility.

@@ -1,23 +1,30 @@
 // app/(tabs)/settings.tsx
 import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  Switch,
-  Alert,
   ActivityIndicator,
+  Alert,
+  ScrollView,
   StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useDatabase } from '../../hooks/use-db';
 import { Settings } from '../../libs/types';
 import { BackupService } from '../../services/backup';
 
+// Import your test functions
+import { testDatabaseTransactions } from '../../tests/database-transactions.test';
+import { testEdgeCases } from '../../tests/edge-cases.test';
+import { testNotificationFlow } from '../../tests/notification-flow.test';
+
 export default function SettingsScreen() {
   const { isInitialized, getSettings, updateSettings } = useDatabase();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showDeveloperOptions, setShowDeveloperOptions] = useState(false);
+  const [tapCount, setTapCount] = useState(0);
 
   const loadSettings = async () => {
     if (!isInitialized) return;
@@ -64,6 +71,72 @@ export default function SettingsScreen() {
     } catch (error) {
       Alert.alert('Error', 'Failed to import data');
     }
+  };
+
+  // Secret tap handler to reveal developer options
+  const handleVersionTap = () => {
+    const newCount = tapCount + 1;
+    setTapCount(newCount);
+    
+    if (newCount >= 5) {
+      setShowDeveloperOptions(true);
+      setTapCount(0);
+      Alert.alert('👨‍💻 Developer Mode', 'Developer options unlocked!');
+    }
+  };
+
+  // Test runner functions
+  const runAllTests = async () => {
+    Alert.alert(
+      'Run All Tests?',
+      'This will test notifications, database transactions, and edge cases. Test data will be created and cleaned up automatically.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Run Tests', 
+          onPress: async () => {
+            console.log('🚀 RUNNING ALL TESTS...');
+            await testNotificationFlow();
+            await testDatabaseTransactions();
+            await testEdgeCases();
+            console.log('🎉 ALL TESTS COMPLETED');
+          }
+        }
+      ]
+    );
+  };
+
+  const runNotificationTest = async () => {
+    Alert.alert(
+      'Test Notifications?',
+      'This will test the notification flow including creating reminders and handling actions.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Test', onPress: testNotificationFlow }
+      ]
+    );
+  };
+
+  const runTransactionTest = async () => {
+    Alert.alert(
+      'Test Database Transactions?',
+      'This will test database integrity and rollback functionality.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Test', onPress: testDatabaseTransactions }
+      ]
+    );
+  };
+
+  const runEdgeCaseTest = async () => {
+    Alert.alert(
+      'Test Edge Cases?',
+      'This will test various edge cases like partial payments, backdating, and deletion cascades.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Test', onPress: testEdgeCases }
+      ]
+    );
   };
 
   if (!isInitialized || !settings) {
@@ -216,12 +289,53 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Developer Options (Hidden) */}
+      {showDeveloperOptions && (
+        <View style={[styles.section, styles.developerSection]}>
+          <Text style={styles.sectionTitle}>🧪 Developer Tests</Text>
+          
+          <TouchableOpacity
+            onPress={runAllTests}
+            style={[styles.testButton, styles.runAllButton]}
+          >
+            <Text style={styles.testButtonText}>Run All Tests</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={runNotificationTest}
+            style={[styles.testButton, styles.notificationTestButton]}
+          >
+            <Text style={styles.testButtonText}>Test Notifications</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={runTransactionTest}
+            style={[styles.testButton, styles.transactionTestButton]}
+          >
+            <Text style={styles.testButtonText}>Test Database Transactions</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={runEdgeCaseTest}
+            style={[styles.testButton, styles.edgeCaseTestButton]}
+          >
+            <Text style={styles.testButtonText}>Test Edge Cases</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.developerNote}>
+            Check console logs for detailed test results
+          </Text>
+        </View>
+      )}
+
       {/* App Info */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>App Information</Text>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Version</Text>
-          <Text style={styles.infoValue}>1.0.0</Text>
+          <TouchableOpacity onPress={handleVersionTap}>
+            <Text style={styles.infoValue}>1.0.0</Text>
+          </TouchableOpacity>
         </View>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Build Date</Text>
@@ -229,6 +343,13 @@ export default function SettingsScreen() {
             {new Date().toLocaleDateString()}
           </Text>
         </View>
+        
+        {/* Hidden hint */}
+        {!showDeveloperOptions && tapCount > 0 && (
+          <Text style={styles.hintText}>
+            Tap version {5 - tapCount} more times for developer options
+          </Text>
+        )}
       </View>
     </ScrollView>
   );
@@ -269,6 +390,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+  },
+  developerSection: {
+    borderColor: '#F59E0B',
+    borderWidth: 2,
   },
   sectionTitle: {
     fontSize: 18,
@@ -350,6 +475,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  testButton: {
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  runAllButton: {
+    backgroundColor: '#10B981',
+  },
+  notificationTestButton: {
+    backgroundColor: '#3B82F6',
+  },
+  transactionTestButton: {
+    backgroundColor: '#8B5CF6',
+  },
+  edgeCaseTestButton: {
+    backgroundColor: '#F59E0B',
+  },
+  testButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  developerNote: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -366,5 +522,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#374151',
+  },
+  hintText: {
+    fontSize: 12,
+    color: '#F59E0B',
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
 });

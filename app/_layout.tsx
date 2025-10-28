@@ -11,45 +11,44 @@ import { NotificationService } from '../services/notifications';
 export default function RootLayout() {
   const router = useRouter();
 
-   
-
   useEffect(() => {
-    const removeHandler = NotificationService.setupNotificationResponseHandler(async (response) => {
-      const { actionIdentifier, notification } = response;
-      const { tenantId, tenantName, dueDate } = notification.request.content.data;
+  const removeHandler = NotificationService.setupNotificationResponseHandler(async (response) => {
+    const { actionIdentifier, notification } = response;
+    const { tenantId, tenantName, dueDate, amount } = notification.request.content.data;
 
-      console.log('Notification action:', actionIdentifier, 'for tenant:', tenantName);
+    console.log('🔔 Notification action:', actionIdentifier, 'for tenant:', tenantName);
 
-      switch (actionIdentifier) {
-        case 'MARK_PAID':
-          // Navigate to record payment screen
-          router.push(`/record-payment?tenantId=${tenantId}`);
-          break;
-          
-        case 'SNOOZE_DAY':
-          // Snooze for 1 day
-          try {
-            await NotificationService.snoozeReminder(tenantId, dueDate, 1);
-            Alert.alert('✅ Snoozed', `Reminder for ${tenantName} snoozed for 1 day`);
-          } catch (error) {
-            console.error('Failed to snooze:', error);
-            Alert.alert('Error', 'Failed to snooze reminder');
+    switch (actionIdentifier) {
+      case 'MARK_PAID':
+        // Navigate to record payment with pre-filled data
+        router.push({
+          pathname: '/record-payment',
+          params: { 
+            tenantId: tenantId.toString(),
+            prefillAmount: amount?.toString() // Pass amount to pre-fill
           }
-          break;
-          
-        default:
-          // Default tap - go to tenant details
-          router.push(`/tenant-details?tenantId=${tenantId}`);
-          break;
-      }
-    });
+        });
+        break;
+        
+      case 'SNOOZE_DAY':
+        try {
+          await NotificationService.snoozeReminder(parseInt(tenantId), dueDate, 1);
+          Alert.alert('✅ Snoozed', `Reminder for ${tenantName} snoozed for 1 day`);
+        } catch (error) {
+          console.error('Failed to snooze:', error);
+          Alert.alert('❌ Error', 'Failed to snooze reminder');
+        }
+        break;
+        
+      default:
+        // Default tap - go to tenant details
+        router.push(`/tenant-details?tenantId=${tenantId}`);
+        break;
+    }
+  });
 
-     
-
-    return removeHandler;
-
-
-  }, []);
+  return removeHandler;
+}, [router]);
 
   return (
     <SafeAreaProvider>

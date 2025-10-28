@@ -1,17 +1,17 @@
 // app/add-tenant.tsx
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
-  ScrollView,
   TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  StyleSheet,
+  View,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 import { useDatabase } from "../hooks/use-db";
 
 const InputField = ({
@@ -61,9 +61,25 @@ export default function AddTenant() {
 
   const handleAddTenant = async () => {
     if (!formData.name.trim() || !formData.roomNumber.trim() || !formData.monthlyRent) {
-      Alert.alert("Missing Information", "Please fill in all required fields.");
+      Alert.alert(
+        "Missing Information", 
+        "Please fill in all required fields marked with *.",
+      [{ text: "OK", style: "default" }]
+          );
       return;
     }
+
+    // Validate monthly rent
+  const monthlyRent = parseFloat(formData.monthlyRent);
+  if (isNaN(monthlyRent) || monthlyRent <= 0) {
+    Alert.alert(
+      "Invalid Amount",
+      "Please enter a valid monthly rent amount.",
+      [{ text: "OK", style: "default" }]
+    );
+    return;
+  }
+
 
     setIsLoading(true);
     try {
@@ -75,12 +91,27 @@ export default function AddTenant() {
         monthlyRent: parseFloat(formData.monthlyRent),
         notes: formData.notes.trim()
       });
-      Alert.alert("Success", "Tenant added successfully!", [
+      Alert.alert(" ✅ Success", "Tenant added successfully!", [
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (error) {
       console.error("Error adding tenant:", error);
-      Alert.alert("Error", "Failed to add tenant. Please try again.");
+        let errorMessage = "Failed to add tenant. Please try again.";
+      let errorTitle = "Error";
+      
+      if (error.message.includes('Room "')) {
+        errorTitle = "🚫 Room Already Occupied";
+        errorMessage = error.message;
+      } else if (error.message.includes('Unable to verify room availability')) {
+        errorTitle = "⚠️ System Busy";
+        errorMessage = error.message;
+      }
+
+      Alert.alert(
+      errorTitle,
+      errorMessage,
+      [{ text: "OK", style: "default" }]
+    );
     } finally {
       setIsLoading(false);
     }
@@ -355,3 +386,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 });
+
+
+
+// app/add-tenant.tsx and app/edit-tenant.tsx
+// Logic:
+// Uses a reusable InputField component, which is good for modularity.
+// Input validation for required fields and numeric rent.
+// Handles loading states for form submission.
+// EditTenant correctly loads existing data.
+// Error messages for duplicate room numbers are specific, which is excellent.
+// Improvements for Production:
+// Form Validation Library: For complex forms, consider a library like Formik with Yup for schema validation. This centralizes validation logic and simplifies error display.
+// Date Picker: For startDate, a native date picker (@react-native-community/datetimepicker or expo-datetimepicker) would be significantly better than a plain text input. This prevents invalid date formats.
+// Phone Number Formatting: Auto-format phone numbers as users type for a better UX.
+// Error Display: Instead of just Alert.alert, display validation errors directly below the input fields.
+// trim() on Input: You're doing .trim() on submission, which is good. Consider doing it on onChangeText as well if leading/trailing spaces affect display or intermediate logic.
+// keyboardType="numeric" vs decimal-pad: For rent, decimal-pad might be more appropriate if decimal amounts are allowed.
+// Input Field Icons: The icon implementation is good.

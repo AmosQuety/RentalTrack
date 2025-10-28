@@ -564,3 +564,16 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 });
+
+// app/(tabs)/tenants.tsx
+// Logic:
+// Comprehensive tenant listing with search, filter (status), and sort functionality.
+// Uses a modal for filter/sort options.
+// useFocusEffect and useAutoRefresh are correctly implemented.
+// Improvements for Production:
+// Filter Logic Optimization: The useEffect that calls filterAndSortTenants is good. For very large datasets (thousands of tenants), you might debounce setSearchQuery to avoid re-rendering on every keystroke.
+// UI for Filters: The filter summary is helpful. Consider visually indicating active filters more prominently.
+// Multi-select Filters: If there were more status options, allowing multi-select could be useful.
+// Accessibility: Ensure the filter modal is fully accessible, especially for screen readers.
+// getStatusColor: Extract this.
+// Pull to Refresh: The pullText is a nice touch for UX.
