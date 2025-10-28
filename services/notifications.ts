@@ -1,11 +1,18 @@
 // services/notifications.ts
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import * as SQLite from 'expo-sqlite';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
-// Get database instance directly
-const db = SQLite.openDatabaseSync('RentReminderDB');
+let db: any = null;
+
+async function getDB() {
+  if (!db && Platform.OS !== 'web') {
+    const SQLite = await import('expo-sqlite');
+    db = SQLite.openDatabaseSync('RentReminderDB');
+  }
+  return db;
+}
+
 
 // Configure notification handler - UPDATED
 Notifications.setNotificationHandler({
