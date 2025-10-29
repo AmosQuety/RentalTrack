@@ -6,9 +6,10 @@ import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } 
 import { useAutoRefresh, useDatabase } from '../../hooks/use-db';
 import { Tenant } from '../../libs/types';
 
+
 export default function Dashboard() {
+  const { isInitialized, getAllTenants, getPaymentStats, heartbeatResults } = useDatabase();
   const router = useRouter();
-  const { isInitialized, getAllTenants, getPaymentStats } = useDatabase();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [stats, setStats] = useState({
     total: 0,
@@ -142,6 +143,25 @@ export default function Dashboard() {
           <Text style={styles.statValue}>{stats.overdue}</Text>
         </View>
       </View>
+
+      {/*  Show heartbeat alerts if any */}
+{heartbeatResults && (heartbeatResults.suspensionAlerts.length > 0 || heartbeatResults.contractAlerts.length > 0) && (
+  <View style={styles.alertContainer}>
+    <Text style={styles.alertTitle}>System Alerts</Text>
+    
+    {heartbeatResults.suspensionAlerts.map((alert, index) => (
+      <View key={index} style={[styles.alertItem, styles.suspensionAlert]}>
+        <Text style={styles.alertText}>🚨 {alert}</Text>
+      </View>
+    ))}
+    
+    {heartbeatResults.contractAlerts.map((alert, index) => (
+      <View key={index} style={[styles.alertItem, styles.contractAlert]}>
+        <Text style={styles.alertText}>📝 {alert}</Text>
+      </View>
+    ))}
+  </View>
+)}
 
       {/* Quick Actions */}
       <View style={styles.actionsContainer}>
@@ -313,18 +333,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
   },
+  alertContainer: {
+  backgroundColor: '#FEF3C7',
+  padding: 16,
+  borderRadius: 8,
+  marginBottom: 16,
+  borderLeftWidth: 4,
+  borderLeftColor: '#F59E0B',
+},
+alertTitle: {
+  fontSize: 16,
+  fontWeight: 'bold',
+  marginBottom: 8,
+  color: '#92400E',
+},
+alertItem: {
+  padding: 8,
+  borderRadius: 4,
+  marginBottom: 4,
+},
+suspensionAlert: {
+  backgroundColor: '#FEE2E2',
+},
+contractAlert: {
+  backgroundColor: '#DBEAFE',
+},
+alertText: {
+  fontSize: 14,
+  color: '#1F2937',
+},
 });
 
-// app/(tabs)/index.tsx (Dashboard)
-// Logic:
-// The loadData function correctly fetches tenants and payment stats.
-// calculateTenantStatus is missing from this file, but you have getStatusColor which uses tenant.status. This status needs to be consistently maintained in the database.
-// formatCurrency is good, but hardcoded to 'en-UG' and 'UGX'. This should ideally come from user settings.
-// The stats cards are well-structured.
-// Improvements for Production:
-// Data Consistency: The tenant.status is determined in database.ts. Ensure this status is updated reliably when payments are recorded or due dates pass. You've correctly added auto-refresh on payment_recorded, tenant_updated, etc., which is good.
-// Currency: Retrieve currency from settings, not hardcode UGX.
-// Dashboard Widgets: For a real dashboard, users might want to customize widgets, add charts (e.g., react-native-chart-kit), or see more detailed breakdowns (e.g., rent collection rate, average occupancy).
-// Empty States: Good empty state for "No tenants yet".
-// useFocusEffect: It's good you're reloading data on focus, but be mindful of performance for very frequent navigation if loadData is expensive.
-// Code Duplication: getStatusColor is duplicated in other files. It should be extracted into a utility file (e.g., utils/styles.ts or utils/helpers.ts).

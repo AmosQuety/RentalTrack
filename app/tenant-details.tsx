@@ -1,4 +1,4 @@
-// app/tenant-details.tsx - WITH AUTO-REFRESH
+// app/tenant-details.tsx - FINAL CORRECTED VERSION
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -20,7 +20,8 @@ export default function TenantDetails() {
     
     try {
       console.log('🔄 Tenant Details: Loading data...');
-      setLoading(true);
+      // Set loading to true only if it's the initial load
+      if (!tenant) setLoading(true);
       const tenantData = await getTenant(parseInt(tenantId as string));
       setTenant(tenantData);
 
@@ -35,7 +36,7 @@ export default function TenantDetails() {
     } finally {
       setLoading(false);
     }
-  }, [tenantId, isInitialized, getTenant, getPaymentHistory]);
+  }, [tenantId, isInitialized, getTenant, getPaymentHistory, tenant]);
 
   // Auto-refresh on database changes
   const { isRefreshing, refresh } = useAutoRefresh(loadTenantData, [
@@ -93,6 +94,65 @@ export default function TenantDetails() {
   const handleRecordPayment = () => {
     router.push(`/record-payment?tenantId=${tenantId}`);
   };
+
+  // --- CORRECTED PAYMENT FOOTER LOGIC ---
+
+  // A smart helper function to render the correct footer based on the tenant's financial status.
+  const renderPaymentFooter = (payment: Payment) => {
+    // Ensure we have tenant data before proceeding
+    if (!tenant) return null;
+
+    // SCENARIO 1: Tenant has a deficit (Balance Due)
+    // This is the most important check. If the status is not 'Paid', any "credit" is actually a partial payment.
+    if (tenant.status === 'Due Soon' || tenant.status === 'Overdue') {
+      const balanceDue = tenant.monthly_rent - tenant.credit_balance;
+      if (balanceDue > 0) {
+        return (
+          <View style={styles.paymentFooter}>
+            <Text style={styles.nextDue}>
+              Next due: <Text style={styles.nextDueDate}>
+                {new Date(payment.next_due_date).toLocaleDateString()}
+              </Text>
+            </Text>
+            <Text style={styles.balanceDueNote}>
+              🔴 Balance Due: {balanceDue.toLocaleString()} UGX
+            </Text>
+          </View>
+        );
+      }
+    }
+
+    // SCENARIO 2: Tenant has a true surplus (Credit)
+    // This only shows if the tenant's status is 'Paid', meaning they have a real credit balance.
+    if (tenant.credit_balance > 0) {
+      return (
+        <View style={styles.paymentFooter}>
+          <Text style={styles.nextDue}>
+            Next due: <Text style={styles.nextDueDate}>
+              {new Date(payment.next_due_date).toLocaleDateString()}
+            </Text>
+          </Text>
+          <Text style={styles.creditNote}>
+            💰 {tenant.credit_balance.toLocaleString()} UGX credit for next payment
+          </Text>
+        </View>
+      );
+    }
+
+    // SCENARIO 3: Default case (No credit, no balance due)
+    // This shows when the tenant is paid up perfectly to the due date.
+    return (
+      <View style={styles.paymentFooter}>
+        <Text style={styles.nextDue}>
+          Next due: <Text style={styles.nextDueDate}>
+            {new Date(payment.next_due_date).toLocaleDateString()}
+          </Text>
+        </Text>
+      </View>
+    );
+  };
+
+  // --- END OF CORRECTIONS ---
 
   if (loading && !tenant) {
     return (
@@ -154,7 +214,7 @@ export default function TenantDetails() {
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Monthly Rent:</Text>
-          <Text style={styles.detailValue}>{tenant.monthly_rent} UGX</Text>
+          <Text style={styles.detailValue}>{tenant.monthly_rent.toLocaleString()} UGX</Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Move-in Date:</Text>
@@ -201,10 +261,8 @@ export default function TenantDetails() {
         {payments.length === 0 ? (
           <Text style={styles.emptyText}>No payment records yet</Text>
         ) : (
-          payments.map(payment => {
+          payments.map((payment, index) => {
             const coveredAmount = payment.months_paid_for * tenant.monthly_rent;
-            const creditAmount = payment.amount_paid - coveredAmount;
-            const hasCredit = creditAmount > 0;
             
             return (
               <View key={payment.payment_id} style={styles.paymentItem}>
@@ -242,16 +300,6 @@ export default function TenantDetails() {
                     </Text>
                   </View>
                   
-                  {hasCredit && (
-                    <View style={styles.breakdownRow}>
-                      <Text style={styles.breakdownLabel}>Credit:</Text>
-                      <Text style={styles.breakdownValue}>Remaining balance</Text>
-                      <Text style={[styles.breakdownAmount, styles.creditAmount]}>
-                        +{creditAmount.toLocaleString()} UGX
-                      </Text>
-                    </View>
-                  )}
-                  
                   <View style={[styles.breakdownRow, styles.totalRow]}>
                     <Text style={styles.breakdownLabel}>Total Paid:</Text>
                     <Text style={styles.breakdownValue}></Text>
@@ -261,18 +309,8 @@ export default function TenantDetails() {
                   </View>
                 </View>
                 
-                <View style={styles.paymentFooter}>
-                  <Text style={styles.nextDue}>
-                    Next due: <Text style={styles.nextDueDate}>
-                      {new Date(payment.next_due_date).toLocaleDateString()}
-                    </Text>
-                  </Text>
-                  {hasCredit && (
-                    <Text style={styles.creditNote}>
-                      💰 {creditAmount.toLocaleString()} UGX credit for next payment
-                    </Text>
-                  )}
-                </View>
+                {/* We only want to show the footer for the MOST RECENT payment (the first one in the list) */}
+                {index === 0 && renderPaymentFooter(payment)}
                 
                 {payment.notes ? (
                   <Text style={styles.paymentNotes}>📝 {payment.notes}</Text>
@@ -282,6 +320,15 @@ export default function TenantDetails() {
           })
         )}
       </View>
+      {/* Debug Info - Remove this after testing */}
+<View style={{ backgroundColor: '#FFFBEB', padding: 12, margin: 16, borderRadius: 8 }}>
+  <Text style={{ fontWeight: 'bold', marginBottom: 8 }}>Debug Info:</Text>
+  <Text>Status: {tenant.status}</Text>
+  <Text>Monthly Rent: {tenant.monthly_rent.toLocaleString()}</Text>
+  <Text>Credit Balance: {tenant.credit_balance.toLocaleString()}</Text>
+  <Text>Balance Due: {(tenant.monthly_rent - tenant.credit_balance).toLocaleString()}</Text>
+  <Text>Should Show Red: {(tenant.status === 'Due Soon' || tenant.status === 'Overdue') && (tenant.monthly_rent - tenant.credit_balance) > 0 ? 'YES' : 'NO'}</Text>
+</View>
     </ScrollView>
   );
 }
@@ -469,6 +516,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#E5E7EB',
     paddingTop: 6,
     marginTop: 2,
+    marginBottom: 8,
   },
   breakdownLabel: {
     fontSize: 13,
@@ -488,9 +536,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     width: '35%',
     textAlign: 'right',
-  },
-  creditAmount: {
-    color: '#10B981',
   },
   totalAmount: {
     color: '#1F2937',
@@ -515,6 +560,15 @@ const styles = StyleSheet.create({
     color: '#10B981',
     fontWeight: '500',
     backgroundColor: '#10B98120',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  balanceDueNote: {
+    fontSize: 12,
+    color: '#DC2626',
+    fontWeight: 'bold',
+    backgroundColor: '#FEE2E2',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,

@@ -13,11 +13,10 @@ async function getDB() {
   return db;
 }
 
-
-// Configure notification handler - UPDATED
+// Configure notification handler - Shows notifications even when app is in foreground
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-   shouldShowAlert: true,
+    shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
     shouldShowBanner: true,    // For when app is in foreground
@@ -34,7 +33,7 @@ export class NotificationService {
     try {
       console.log('🔔 Initializing notifications...');
 
-      // Request permissions
+      // Request permissions (only on real devices)
       if (Device.isDevice) {
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
@@ -46,11 +45,18 @@ export class NotificationService {
 
         if (finalStatus !== 'granted') {
           console.log('🔕 Notification permissions denied');
+          Alert.alert(
+            'Notifications Disabled',
+            'Please enable notifications in your device settings to receive rent reminders.',
+            [{ text: 'OK' }]
+          );
           return false;
         }
+      } else {
+        console.log('⚠️ Not a physical device - notifications may not work properly');
       }
 
-      // Setup notification categories for actions
+      // Setup notification categories with actionable buttons
       await Notifications.setNotificationCategoryAsync('RENT_REMINDER', [
         {
           identifier: 'MARK_PAID',
@@ -106,13 +112,23 @@ export class NotificationService {
       });
 
       console.log(`✅ Notification scheduled: ${notificationId}`);
+      console.log(`📅 Scheduled for: ${trigger}`);
       return notificationId;
     } catch (error) {
       console.error('❌ Failed to schedule notification:', error);
       
-      // Fallback for development - show alert
-      if (__DEV__) {
-        Alert.alert(`[DEV] ${title}`, body);
+      // Better error handling for production
+      if (!__DEV__) {
+        // Log to your error tracking service (e.g., Sentry)
+        console.error('PRODUCTION ERROR - Notification scheduling failed:', {
+          title,
+          body,
+          trigger,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      } else {
+        // Show alert in development
+        Alert.alert(`[DEV] Notification Error`, `${title}\n${body}\n\nError: ${error}`);
       }
       
       return null;
@@ -126,7 +142,12 @@ export class NotificationService {
   ): Promise<void> {
     try {
       // Import Database methods
-      const Database = (await import('../db/database')).default;
+      const Database = (await import('../db/database')).Database;
+      const dbInstance = await getDB();
+      
+      if (!dbInstance) {
+        throw new Error('Database not initialized');
+      }
       
       const tenant = await Database.getTenant(tenantId);
       const settings = await Database.getSettings();
@@ -140,12 +161,12 @@ export class NotificationService {
         return;
       }
 
-      // Calculate reminder date
+      // Calculate reminder date based on settings
       const dueDateObj = new Date(dueDate);
       const reminderDate = new Date(dueDateObj);
       reminderDate.setDate(reminderDate.getDate() - settings.reminder_days_before_due);
 
-      // Set reminder time
+      // Set reminder time from settings
       const [hours, minutes] = settings.reminder_time.split(':');
       reminderDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 0, 0);
 
@@ -155,20 +176,21 @@ export class NotificationService {
         return;
       }
 
+      // Create clear, informative message
       const message = customMessage || 
-        `Rent payment of UGX ${tenant.monthly_rent} due for ${tenant.name} (Room ${tenant.room_number})`;
+        `Rent payment of ${tenant.monthly_rent.toLocaleString()} UGX is due on ${new Date(dueDate).toLocaleDateString()}`;
 
-      // Insert reminder directly using db
-      await db.runAsync(
+      // Insert reminder into database
+      await dbInstance.runAsync(
         `INSERT INTO reminders (tenant_id, due_date, reminder_date, message, status) 
          VALUES (?, ?, ?, ?, ?)`,
         [tenantId, dueDate, reminderDate.toISOString(), message, 'Pending']
       );
 
-      // Schedule notification
+      // Schedule the actual notification
       await this.scheduleNotification(
-        `💰 Rent Due: ${tenant.name}`,
-        message,
+        `💰 Rent Due Soon: ${tenant.name}`,
+        `Room ${tenant.room_number} - ${message}`,
         { date: reminderDate },
         {
           tenantId,
@@ -176,18 +198,20 @@ export class NotificationService {
           roomNumber: tenant.room_number,
           amount: tenant.monthly_rent,
           dueDate: dueDate,
+          reminderDate: reminderDate.toISOString(),
           type: 'rent_reminder'
         }
       );
 
-      console.log(`✅ Reminder created for ${tenant.name} on ${reminderDate.toISOString()}`);
+      console.log(`✅ Reminder created for ${tenant.name} (Room ${tenant.room_number})`);
+      console.log(`   Due: ${new Date(dueDate).toLocaleDateString()}`);
+      console.log(`   Reminder: ${reminderDate.toLocaleDateString()} at ${settings.reminder_time}`);
     } catch (error) {
       console.error('❌ Failed to create reminder:', error);
       throw error;
     }
   }
 
-  // NEW: Snooze reminder
   static async snoozeReminder(
     tenantId: number,
     originalDueDate: string,
@@ -195,6 +219,12 @@ export class NotificationService {
   ): Promise<void> {
     try {
       const Database = (await import('../db/database')).default;
+      const dbInstance = await getDB();
+      
+      if (!dbInstance) {
+        throw new Error('Database not initialized');
+      }
+      
       const tenant = await Database.getTenant(tenantId);
       const settings = await Database.getSettings();
 
@@ -207,11 +237,13 @@ export class NotificationService {
       snoozeDate.setDate(snoozeDate.getDate() + snoozeDays);
       snoozeDate.setHours(parseInt(settings.reminder_time.split(':')[0], 10));
       snoozeDate.setMinutes(parseInt(settings.reminder_time.split(':')[1], 10));
+      snoozeDate.setSeconds(0);
+      snoozeDate.setMilliseconds(0);
 
-      const message = `⏰ Snoozed: Rent reminder for ${tenant.name} (Room ${tenant.room_number})`;
+      const message = `⏰ Reminder snoozed - Rent payment due for ${tenant.name} (Room ${tenant.room_number})`;
 
       // Insert snoozed reminder
-      await db.runAsync(
+      await dbInstance.runAsync(
         `INSERT INTO reminders (tenant_id, due_date, reminder_date, message, status) 
          VALUES (?, ?, ?, ?, ?)`,
         [tenantId, originalDueDate, snoozeDate.toISOString(), message, 'Pending']
@@ -219,19 +251,21 @@ export class NotificationService {
 
       // Schedule notification
       await this.scheduleNotification(
-        `⏰ Snoozed: ${tenant.name}`,
+        `⏰ Reminder: ${tenant.name}`,
         message,
         { date: snoozeDate },
         {
           tenantId,
           tenantName: tenant.name,
           roomNumber: tenant.room_number,
+          amount: tenant.monthly_rent,
           dueDate: originalDueDate,
-          type: 'snoozed_reminder'
+          type: 'snoozed_reminder',
+          snoozedUntil: snoozeDate.toISOString()
         }
       );
 
-      console.log(`✅ Reminder snoozed for ${tenant.name} until ${snoozeDate.toISOString()}`);
+      console.log(`✅ Reminder snoozed for ${tenant.name} until ${snoozeDate.toLocaleString()}`);
     } catch (error) {
       console.error('❌ Failed to snooze reminder:', error);
       throw error;
@@ -240,22 +274,32 @@ export class NotificationService {
 
   static async cancelReminders(tenantId: number): Promise<void> {
     try {
-      // Cancel scheduled notifications for this tenant
+      const dbInstance = await getDB();
+      
+      if (!dbInstance) {
+        console.warn('⚠️ Database not available for canceling reminders');
+        return;
+      }
+
+      // Cancel all scheduled notifications for this tenant
       const scheduledNotifications = await Notifications.getAllScheduledNotificationsAsync();
+      let canceledCount = 0;
+      
       for (const notification of scheduledNotifications) {
         if (notification.content.data?.tenantId === tenantId) {
           await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+          canceledCount++;
         }
       }
 
-      // Update database using direct db access
-      await db.runAsync(
+      // Update database - mark reminders as cancelled
+      await dbInstance.runAsync(
         `UPDATE reminders SET status = 'Cancelled' 
          WHERE tenant_id = ? AND status = 'Pending'`,
         [tenantId]
       );
 
-      console.log(`✅ Cancelled reminders for tenant ${tenantId}`);
+      console.log(`✅ Cancelled ${canceledCount} scheduled notification(s) for tenant ${tenantId}`);
     } catch (error) {
       console.error('❌ Failed to cancel reminders:', error);
     }
@@ -263,17 +307,25 @@ export class NotificationService {
 
   static async checkPendingReminders(): Promise<void> {
     try {
+      const dbInstance = await getDB();
+      
+      if (!dbInstance) {
+        console.log('⚠️ Database not available for checking reminders');
+        return;
+      }
+
       const today = new Date().toISOString().split('T')[0];
       
-      // Get pending reminders using direct db access
+      // Get pending reminders that should have been sent
       let pendingReminders: any[] = [];
       try {
-        const result = await db.getAllAsync(
+        const result = await dbInstance.getAllAsync(
           `SELECT r.*, t.name, t.room_number 
            FROM reminders r 
            JOIN tenants t ON r.tenant_id = t.tenant_id 
-           WHERE date(r.reminder_date) <= date(?) AND r.status = 'Pending'`,
-          [`${today} 23:59:59`]
+           WHERE date(r.reminder_date) <= date(?) AND r.status = 'Pending'
+           ORDER BY r.reminder_date ASC`,
+          [today]
         );
         
         pendingReminders = result || [];
@@ -282,15 +334,16 @@ export class NotificationService {
         return;
       }
 
-      console.log(`🔍 Found ${pendingReminders.length} pending reminders`);
+      console.log(`🔍 Found ${pendingReminders.length} pending reminder(s) to process`);
 
+      // Mark them as sent
       for (const reminder of pendingReminders) {
         try {
-          await db.runAsync(
+          await dbInstance.runAsync(
             'UPDATE reminders SET status = ? WHERE reminder_id = ?',
             ['Sent', reminder.reminder_id]
           );
-          console.log(`✅ Marked reminder as sent for ${reminder.name}`);
+          console.log(`✅ Marked reminder as sent for ${reminder.name} (Room ${reminder.room_number})`);
         } catch (updateError) {
           console.error('❌ Error updating reminder status:', updateError);
         }
@@ -300,30 +353,48 @@ export class NotificationService {
     }
   }
 
-  // Setup notification response handler
+  // Get all scheduled notifications (useful for debugging)
+  static async getAllScheduledNotifications(): Promise<Notifications.NotificationRequest[]> {
+    try {
+      return await Notifications.getAllScheduledNotificationsAsync();
+    } catch (error) {
+      console.error('❌ Failed to get scheduled notifications:', error);
+      return [];
+    }
+  }
+
+  // Cancel all notifications (useful for testing/debugging)
+  static async cancelAllNotifications(): Promise<void> {
+    try {
+      await Notifications.cancelAllScheduledNotificationsAsync();
+      console.log('✅ Cancelled all scheduled notifications');
+    } catch (error) {
+      console.error('❌ Failed to cancel all notifications:', error);
+    }
+  }
+
+  // Setup notification response handler - THIS IS CRITICAL FOR ACTIONABLE NOTIFICATIONS
+  // This should be called in your root layout component
   static setupNotificationResponseHandler(
     handler: (response: Notifications.NotificationResponse) => void
   ): () => void {
     const subscription = Notifications.addNotificationResponseReceivedListener(handler);
-    return () => subscription.remove();
+    console.log('✅ Notification response handler registered');
+    return () => {
+      subscription.remove();
+      console.log('🔕 Notification response handler removed');
+    };
+  }
+
+  // Setup foreground notification listener (for when app is open)
+  static setupForegroundNotificationHandler(
+    handler: (notification: Notifications.Notification) => void
+  ): () => void {
+    const subscription = Notifications.addNotificationReceivedListener(handler);
+    console.log('✅ Foreground notification handler registered');
+    return () => {
+      subscription.remove();
+      console.log('🔕 Foreground notification handler removed');
+    };
   }
 }
-
-// services/notifications.ts
-// Logic:
-// Handles Expo notification setup, permissions, and scheduling.
-// Configures a notification category with actionable buttons ("Mark as Paid", "Snooze"). This is an advanced and very useful feature.
-// createReminder: Integrates with database settings to determine reminder date and message.
-// snoozeReminder: Excellent addition to handle snoozing directly from a notification.
-// cancelReminders: Good for cleaning up when a tenant is deleted or pays.
-// checkPendingReminders: Checks for overdue reminders in the database and marks them as 'Sent'.
-// Improvements for Production:
-// Actionable Notifications (CRITICAL):
-// You've set up the categories and actions, but the code to handle the response from these actions (Notifications.addNotificationResponseReceivedListener) is not shown in this file or elsewhere. This is the second biggest missing piece for production readiness.
-// When a user taps "Mark as Paid" or "Snooze 1 Day" from a notification, your app needs to receive this event and trigger the corresponding recordPayment or snoozeReminder logic. This typically involves navigating to a specific screen, pre-filling data, and then executing the database operation.
-// Foreground vs. Background Handling: Your Notifications.setNotificationHandler handles how notifications are presented when the app is in the foreground. You also need to consider how the app behaves when opened from a notification when it was killed or in the background. The setupNotificationResponseHandler is the right step, but its implementation needs to be present in your root app component.
-// Error Handling for scheduleNotification: The Alert.alert in __DEV__ is useful, but ensure robust logging and user feedback in production if notifications fail.
-// db.runAsync vs. Database.addReminder: You're directly using db.runAsync to insert reminders. While fine, if Database had a addReminder method that also emitted an event, it might be more consistent with the useDatabase hook pattern.
-// Time Zone Issues: new Date().toISOString() is fine for storing, but when scheduleNotification uses { date: reminderDate }, ensure reminderDate is correct in the user's local time zone for scheduling purposes. Expo Notifications handles this fairly well, but be aware.
-// Recurring Reminders: Your current system creates one-off reminders for the next due date. A robust system might need to manage recurring reminders or a chain of reminders more explicitly.
-// Notification Content: Make sure notification messages are clear and contain all necessary information.

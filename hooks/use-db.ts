@@ -39,12 +39,21 @@ export const dbEvents = new DatabaseEventEmitter();
 export const useDatabase = () => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [heartbeatResults, setHeartbeatResults] = useState<{
+    statusUpdates: number;
+    suspensionAlerts: string[];
+    contractAlerts: string[];
+  } | null>(null);
 
   useEffect(() => {
     const initApp = async () => {
       try {
         await initializeDatabase();
         await NotificationService.initialize();
+
+        // NEW: Run system heartbeat on app start
+        const results = await Database.runSystemHeartbeat();
+        setHeartbeatResults(results);
         
         // NEW: Update tenant statuses on app start
         await Database.updateAllTenantStatuses();
@@ -59,6 +68,21 @@ export const useDatabase = () => {
     };
 
     initApp();
+  }, []);
+
+   const runHeartbeat = useCallback(async (): Promise<{
+    statusUpdates: number;
+    suspensionAlerts: string[];
+    contractAlerts: string[];
+  }> => {
+    try {
+      const results = await Database.runSystemHeartbeat();
+      setHeartbeatResults(results);
+      return results;
+    } catch (error) {
+      console.error('Failed to run heartbeat:', error);
+      throw error;
+    }
   }, []);
 
   // Enhanced tenant methods with event emission
@@ -82,7 +106,25 @@ export const useDatabase = () => {
   const recordPayment = useCallback(async (payment: any) => {
     const result = await Database.recordPayment(payment);
     dbEvents.emit('payment_recorded');
-    return result;
+
+    // Show alert for partial payments
+    if (result.shouldAlertPartial && result.alertMessage) {
+      // You might want to use a different alert mechanism here
+      console.log('🔔 Partial Payment Alert:', result.alertMessage);
+    }
+    
+    return result.paymentId;
+  }, []);
+
+   // ADD CANCEL PAYMENT METHOD HERE - RIGHT AFTER recordPayment
+  const cancelPayment = useCallback(async (paymentId: number, reason: string) => {
+    await Database.cancelPayment(paymentId, reason);
+    dbEvents.emit('payment_recorded'); // Emit same event as recordPayment to refresh views
+  }, []);
+
+  // NEW: Advanced analytics
+  const getAdvancedAnalytics = useCallback(async () => {
+    return await Database.getAdvancedAnalytics();
   }, []);
 
   // Enhanced settings method with event emission
@@ -94,18 +136,31 @@ export const useDatabase = () => {
   return {
     isInitialized,
     error,
-    // Tenant methods
+    heartbeatResults,
+
+    // Core methods
     getAllTenants: Database.getAllTenants,
     getTenant: Database.getTenant,
-    addTenant,
-    updateTenant,
-    deleteTenant,
-    
+    addTenant: Database.addTenant,
+    updateTenant: Database.updateTenant,
+    deleteTenant: Database.deleteTenant,
+
+      
     // Payment methods
     recordPayment,
+    cancelPayment,
     getPaymentHistory: Database.getPaymentHistory,
     getPaymentStats: Database.getPaymentStats,
     getMonthlyTrend: Database.getMonthlyTrend,
+    getAdvancedAnalytics,
+    getDashboardStats: Database.getDashboardStats,
+    getTenantStats: Database.getTenantStats,
+    getTenantWithDetails: Database.getTenantWithDetails,
+
+      // System methods
+    runHeartbeat,
+    updateAllTenantStatuses: Database.updateAllTenantStatuses,
+    resetCreditBalance: Database.resetCreditBalance,
     
     // Reminder methods
     getUpcomingReminders: Database.getUpcomingReminders,
@@ -150,13 +205,3 @@ export const useAutoRefresh = (
   return { isRefreshing, refresh };
 };
 
-// hooks/use-db.ts
-// Logic:
-// Centralizes database initialization.
-// Provides isInitialized state.
-// DatabaseEventEmitter: This is an excellent pattern for reactive updates across your app without complex global state. Very good job implementing this.
-// useAutoRefresh: This hook beautifully leverages the DatabaseEventEmitter to automatically reload data in components when relevant database events occur. This is a robust solution for ensuring data freshness.
-// Improvements for Production:
-// Error Display: setError is stored but not displayed in the useDatabase hook itself. Consider how this error state would be presented to the user (e.g., a global error banner).
-// Singleton Pattern for dbEvents: dbEvents is instantiated globally. This is appropriate for a singleton event bus.
-// useCallback for DB calls: Wrapping the mutating DB functions (addTenant, updateTenant, deleteTenant, recordPayment, updateSettings) in useCallback is a good practice as it prevents unnecessary re-creations of these functions and potentially unnecessary re-renders in components that depend on them.

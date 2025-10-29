@@ -1,5 +1,6 @@
 // app/add-tenant.tsx
 import { Ionicons } from "@expo/vector-icons";
+import { addMonths, format } from "date-fns";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -49,13 +50,19 @@ export default function AddTenant() {
   const { isInitialized, addTenant } = useDatabase();
 
   const [formData, setFormData] = useState({
-    name: "",
-    phone: "",
-    roomNumber: "",
-    startDate: new Date().toISOString().split("T")[0],
-    monthlyRent: "",
-    notes: "",
+  name: "",
+  phone: "",
+  roomNumber: "",
+  startDate: new Date().toISOString().split("T")[0],
+  contractEndDate: format(addMonths(new Date(), 12), 'yyyy-MM-dd'), // Default 1 year
+  monthlyRent: "",
+  rentCycle: "monthly" as 'monthly' | 'biweekly' | 'quarterly',
+  notes: "",
   });
+
+ 
+
+
 
   const [isLoading, setIsLoading] = useState(false);
 
@@ -88,7 +95,9 @@ export default function AddTenant() {
         phone: formData.phone.trim(),
         roomNumber: formData.roomNumber.trim(),
         startDate: formData.startDate,
+        contractEndDate: formData.contractEndDate,
         monthlyRent: parseFloat(formData.monthlyRent),
+        rentCycle: formData.rentCycle,
         notes: formData.notes.trim()
       });
       Alert.alert(" ✅ Success", "Tenant added successfully!", [
@@ -139,6 +148,32 @@ export default function AddTenant() {
         <Text style={styles.headerTitle}>Add Tenant</Text>
         <View style={styles.headerSpacer} />
       </View>
+
+      {/* Rent Cycle Selector */}
+<View style={styles.inputContainer}>
+  <Text style={styles.inputLabel}>
+    Rent Cycle <Text style={styles.required}>*</Text>
+  </Text>
+  <View style={styles.cycleOptions}>
+    {['monthly', 'biweekly', 'quarterly'].map(cycle => (
+      <TouchableOpacity
+        key={cycle}
+        onPress={() => setFormData(prev => ({ ...prev, rentCycle: cycle as any }))}
+        style={[
+          styles.cycleOption,
+          formData.rentCycle === cycle && styles.cycleOptionSelected
+        ]}
+      >
+        <Text style={[
+          styles.cycleOptionText,
+          formData.rentCycle === cycle && styles.cycleOptionTextSelected
+        ]}>
+          {cycle.charAt(0).toUpperCase() + cycle.slice(1)}
+        </Text>
+      </TouchableOpacity>
+    ))}
+  </View>
+</View>
 
       {/* Content */}
       <ScrollView 
@@ -193,6 +228,14 @@ export default function AddTenant() {
             placeholder="YYYY-MM-DD"
             icon={<Ionicons name="calendar-outline" size={20} color="#6B7280" />}
           />
+
+          <InputField
+              label="Contract End Date"
+              value={formData.contractEndDate}
+              onChange={(text) => setFormData((prev) => ({ ...prev, contractEndDate: text }))}
+              placeholder="YYYY-MM-DD"
+              icon={<Ionicons name="calendar-outline" size={20} color="#6B7280" />}
+            />
 
           <InputField
             label="Notes"
@@ -385,22 +428,44 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
+  
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    color: '#1F2937',
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+    color: '#1F2937',
+  },
+  metricRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  metricLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  metricValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
 });
 
-
-
-// app/add-tenant.tsx and app/edit-tenant.tsx
-// Logic:
-// Uses a reusable InputField component, which is good for modularity.
-// Input validation for required fields and numeric rent.
-// Handles loading states for form submission.
-// EditTenant correctly loads existing data.
-// Error messages for duplicate room numbers are specific, which is excellent.
-// Improvements for Production:
-// Form Validation Library: For complex forms, consider a library like Formik with Yup for schema validation. This centralizes validation logic and simplifies error display.
-// Date Picker: For startDate, a native date picker (@react-native-community/datetimepicker or expo-datetimepicker) would be significantly better than a plain text input. This prevents invalid date formats.
-// Phone Number Formatting: Auto-format phone numbers as users type for a better UX.
-// Error Display: Instead of just Alert.alert, display validation errors directly below the input fields.
-// trim() on Input: You're doing .trim() on submission, which is good. Consider doing it on onChangeText as well if leading/trailing spaces affect display or intermediate logic.
-// keyboardType="numeric" vs decimal-pad: For rent, decimal-pad might be more appropriate if decimal amounts are allowed.
-// Input Field Icons: The icon implementation is good.

@@ -1,0 +1,1 @@
+is the rent calculations robust i.e cover almost all scenarios

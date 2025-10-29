@@ -270,6 +270,54 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* Auto-Suspension Settings */}
+<View style={styles.settingGroup}>
+  <Text style={styles.settingLabel}>Auto-Suspend After (Days)</Text>
+  <View style={styles.optionsContainer}>
+    {[15, 30, 45, 60].map(days => (
+      <TouchableOpacity
+        key={days}
+        onPress={() => updateSetting('auto_suspend_days', days)}
+        style={[
+          styles.optionButton,
+          settings.auto_suspend_days === days && styles.optionButtonSelected
+        ]}
+      >
+        <Text style={[
+          styles.optionText,
+          settings.auto_suspend_days === days && styles.optionTextSelected
+        ]}>
+          {days} days
+        </Text>
+      </TouchableOpacity>
+    ))}
+  </View>
+</View>
+
+{/* Contract Reminder Settings */}
+<View style={styles.settingGroup}>
+  <Text style={styles.settingLabel}>Contract Reminder (Days Before)</Text>
+  <View style={styles.optionsContainer}>
+    {[30, 60, 90].map(days => (
+      <TouchableOpacity
+        key={days}
+        onPress={() => updateSetting('contract_reminder_days', days)}
+        style={[
+          styles.optionButton,
+          settings.contract_reminder_days === days && styles.optionButtonSelected
+        ]}
+      >
+        <Text style={[
+          styles.optionText,
+          settings.contract_reminder_days === days && styles.optionTextSelected
+        ]}>
+          {days} days
+        </Text>
+      </TouchableOpacity>
+    ))}
+  </View>
+</View>
+
       {/* Data Management */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Data Management</Text>

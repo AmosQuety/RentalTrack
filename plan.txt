@@ -1,130 +1,148 @@
-🔄 PROBLEM: MANUAL APP REFRESH REQUIRED
-THE PROBLEM:
-When users perform actions like adding tenants or recording payments, the changes don't appear immediately in the app. Users have to close and reopen the entire application to see updated data, which is inconvenient and creates a poor user experience.
-
-WHERE IT HAPPENS:
-Adding new tenants
-
-Recording payments
-
-Editing tenant information
-
-Any data changes that should update lists or statistics
-
-ROOT CAUSE:
-The app screens load data only once when they open, but don't automatically refresh when the underlying database changes.
-
-🛠️ SOLUTIONS NEEDED:
-1. AUTOMATIC SCREEN REFRESHES
-Refresh tenant list immediately after adding/editing tenants
-
-Update dashboard statistics after any financial changes
-
-Refresh tenant details after recording payments
-
-Update analytics after data modifications
-
-2. PULL-TO-REFRESH FEATURE
-Add pull-down to refresh on all list screens
-
-Allow manual refresh when users want latest data
-
-Show loading indicators during refresh
-
-3. NAVIGATION-AWARE UPDATES
-Automatically refresh data when returning to a screen
-
-Update screens when they come back into view
-
-Ensure data is current after any user action
-
-4. BETTER USER FEEDBACK
-Show success messages after actions
-
-Display loading states during operations
-
-Provide clear indication when data is updating
-
-🎯 END GOAL:
-Users should see all their changes immediately without ever needing to close and reopen the app. The app should feel responsive, live, and always show current data.
-
-Priority: High - This directly impacts user satisfaction and app usability.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-⚠️ SHOULD FIX BEFORE RELEASE:
-Payment Validation - Prevent invalid amounts
-
-Date Handling - Ensure proper date calculations
-
-Error Handling - Better user feedback
-
-
-
-
-❌ MISSING/INCOMPLETE FEATATURES
-
-
-3. Enhanced Reminder Management
-❌ Manual reminder creation from tenant details
-
-❌ Reminder status updates (acknowledged, cancelled)
-
-❌ Swipe actions on reminders list
-
-4. Payment Management
-❌ Edit/Delete payment records
-
-❌ Payment validation (prevent overpayment logic)
-
-5. Data Import Validation
-❌ Better validation for imported backup files
-
-❌ Conflict resolution for duplicate data
-
-6. UI/UX Enhancements
-❌ Color-coded status throughout the app (currently only in some places)
-
-❌ Swipe actions on tenant lists
-
-❌ Pull-to-refresh on all lists
-
-❌ Loading states and better error handling
-
-7. Settings Features
-❌ Theme implementation (Light/Dark/Auto)
-
-❌ Currency formatting throughout the app
-
-❌ Data backup path configuration
-
-8. Analytics Enhancements
-❌ More detailed charts and reports
-
-❌ Export analytics data
-
-❌ Monthly collection vs expected comparison
-
-9. Edge Case Handling
-❌ Tenant pays before reminder → reminder cancellation logic
-
-❌ Payment validation (amount vs monthly rent)
-
-❌ Date validation and formatting
+### The Upgraded Grand Algorithm: A Production-Ready Blueprint
+
+This algorithm is built on four foundational pillars:
+1.  **Single Source of Truth:** `start_date` and `monthly_rent` are the core facts.
+2.  **Immutable Ledger:** The `payments` table is a permanent historical record.
+3.  **Calculated State:** Key metrics like `status` and `credit_balance` are always calculated on demand, never just stored statically.
+4.  **The Heartbeat:** The system must actively audit itself and react to the passage of time.
+
+---
+
+### Algorithm A (v2): Creating a New Tenant (with Flexibility)
+
+This algorithm runs when a user creates a new tenant.
+
+*   **INPUT:**
+    *   `name`: string (e.g., "John Doe")
+    *   `phone`: string (e.g., "9494846")
+    *   `room_number`: string (e.g., "A-101")
+    *   `monthly_rent`: number (e.g., 45000)
+    *   `start_date`: string (e.g., "2025-10-28")
+    *   `contract_end_date`: string (e.g., "2026-10-27")
+    *   `rent_cycle`: string ('monthly', 'biweekly', or 'quarterly')
+
+*   **VALIDATION:**
+    1.  Query the `tenants` table to check if `room_number` already exists. If yes, reject the creation and return an error: "Room is already occupied."
+    2.  Check if `monthly_rent` is a positive number (> 0). If not, reject.
+    3.  Check if `start_date` and `contract_end_date` are valid date formats.
+
+*   **PROCESS:**
+    1.  Create a new record in the `tenants` table with all the input details.
+    2.  Set the initial `credit_balance` for this new tenant to `0`.
+    3.  **Calculate the First Due Date:** Use a helper function, `calculateNextDueDate(baseDate, cycle)`, based on the tenant's `rent_cycle`:
+        *   If `rent_cycle` is 'monthly', the First Due Date is `addMonths(start_date, 1)`.
+        *   If `rent_cycle` is 'biweekly', the First Due Date is `addDays(start_date, 14)`.
+        *   If `rent_cycle` is 'quarterly', the First Due Date is `addMonths(start_date, 3)`.
+    4.  **Set the Initial Status:** Compare the calculated First Due Date to today's date.
+        *   If the First Due Date is in the past, set the initial `status` to `'Overdue'`.
+        *   Otherwise, set the initial `status` to `'Due Soon'`.
+    5.  Save this calculated `status` to the new tenant record.
+    6.  **Schedule the First Reminder:** Create a new record in the `reminders` table. The `due_date` is the First Due Date, and the `reminder_date` is calculated based on the user's settings (e.g., 3 days before the `due_date`).
+
+*   **OUTPUT:**
+    *   A new tenant is successfully created in the database.
+    *   The tenant has an accurate initial status and a scheduled rent reminder.
+
+---
+
+### Algorithm B (v2): Recording a Payment (with Decision Logic)
+
+This algorithm runs when a payment is recorded for a tenant. It **must** be executed as a single, atomic database transaction.
+
+*   **INPUT:**
+    *   `tenant_id`: number (e.g., 123)
+    *   `amount_paid`: number (e.g., 40000)
+    *   `payment_date`: string (e.g., "2025-10-28")
+    *   `payment_method`: string (e.g., "Cash")
+    *   `notes`: string (optional)
+
+*   **PROCESS:**
+    1.  **Start Database Transaction.**
+    2.  **Gather Financial State:**
+        *   Fetch the `Tenant` record using `tenant_id` to get their `monthly_rent`, `start_date`, `rent_cycle`, and current `credit_balance`.
+        *   **Determine the Base Date for Calculation:**
+            *   a) Query the `payments` table for the most recent payment for this `tenant_id`. If one exists, use its `next_due_date` as the `baseDate`.
+            *   b) If no payments exist, the `baseDate` is the tenant's **First Due Date** (calculated as `calculateNextDueDate(start_date, rent_cycle)`).
+    3.  **Perform Calculation:**
+        *   `Total Available Funds` = `amount_paid` + current `credit_balance`.
+        *   `Full Cycles Covered` = `floor(Total Available Funds / monthly_rent)`.
+        *   `New Credit Balance` = `Total Available Funds % monthly_rent` (the remainder).
+        *   `New Next Due Date` = Calculate by adding `Full Cycles Covered` cycles to the `baseDate` using the `calculateNextDueDate` helper function.
+    4.  **Commit Results to Database:**
+        *   **Step 1 (Record History):** Create a new `Payment` record with all the details: `tenant_id`, `amount_paid`, `payment_date`, `Full Cycles Covered`, and the `New Next Due Date`.
+        *   **Step 2 (Update State):** Update the `Tenant` record, setting their `credit_balance` to the `New Credit Balance`.
+        *   **Step 3 (Update Status):** Recalculate the tenant's status using the `New Next Due Date` and update the `status` on the `Tenant` record.
+    5.  **Manage Side-Effects:**
+        *   Delete all `'Pending'` reminders from the `reminders` table for this `tenant_id`.
+        *   Create a new `'Pending'` reminder for the `New Next Due Date`.
+    6.  **Commit Database Transaction.**
+    7.  **Execute Automated Decision Logic:**
+        *   **Check for Partial Payment:** After the transaction is successful, check if the tenant's new `status` is `'Due Soon'` or `'Overdue'`. If it is, this implies a payment was made but was not enough to cover the full period.
+        *   If `TRUE`, trigger an immediate system alert/notification for the landlord: `"Partial payment of [amount_paid] recorded for [tenant_name]. A balance of [monthly_rent - New Credit Balance] is still due."`
+
+*   **OUTPUT:**
+    *   A permanent payment record is created.
+    *   The tenant's balance, status, and next due date are all instantly and accurately updated.
+    *   The landlord is automatically alerted to any partial payment scenarios.
+
+---
+
+### Algorithm C (v2): The System Heartbeat & Automated Auditing
+
+This algorithm runs automatically to keep the system's data fresh and flag risks.
+
+*   **TRIGGER:**
+    *   When the application is launched from a closed state.
+    *   When the application returns to the foreground.
+    *   (Optional but recommended) On a scheduled daily basis.
+
+*   **PROCESS:**
+    1.  **Stage 1: Update Financial Statuses:**
+        *   Loop through every tenant in the database.
+        *   For each tenant, determine their correct `current_status` ('Paid', 'Due Soon', 'Overdue') by calculating their next due date (using the same logic as in Algorithm B) and comparing it to today's date.
+        *   If the calculated `current_status` is different from the `status` stored in the database, update the tenant's record with the new, correct status.
+    2.  **Stage 2: Execute Automated Administrative Decisions:**
+        *   After statuses are updated, loop through all tenants again.
+        *   **Check for Auto-Suspension:**
+            *   `IF tenant.status IS 'Overdue' AND today's_date > (tenant.next_due_date + 30 days)`:
+                *   Change the tenant's `status` to `'Suspended'`.
+                *   Create a high-priority, persistent notification on the main dashboard for the landlord: `"Action Required: [tenant_name] in Room [room_number] is over 30 days late. Account flagged for suspension."`
+    3.  **Stage 3: Check for Upcoming Events:**
+        *   Query the `tenants` table for all tenants where `contract_end_date` is between today's date and 60 days from now.
+        *   For each tenant found, add an item to a "Contract Expiry" list on the dashboard: `"[tenant_name]'s contract expires on [contract_end_date]."`
+
+*   **OUTPUT:**
+    *   All tenant statuses are guaranteed to be accurate.
+    *   High-risk tenants are automatically flagged (`Suspended`).
+    *   The landlord is proactively informed of upcoming administrative tasks (contract renewals).
+
+---
+
+### Algorithm D (v2): Real-Time Analytics & Dashboards
+
+This algorithm consists of a set of queries that run whenever the Analytics Dashboard is viewed.
+
+*   **INPUT:** The current date.
+
+*   **PROCESS:**
+    1.  **Metric: Expected vs. Received Rent (This Month):**
+        *   `Received` = `SUM(amount_paid)` from the `payments` table where `payment_date` is within the current calendar month.
+        *   `Expected` = Loop through all active (`status` is not `'Suspended'`) tenants. For each one, determine their next due date. If that date falls within the current calendar month, add their `monthly_rent` to a running total.
+        *   Display `Received`, `Expected`, and the collection percentage.
+    2.  **Metric: Overdue Rent Trend (Last 4 Weeks):**
+        *   `Week 0 (Now)` = `SUM(monthly_rent - credit_balance)` for all tenants where `status` is `'Overdue'`.
+        *   `Week -1 (7 Days Ago)` = Re-run the status calculation logic for every tenant as if today were 7 days ago. Sum the rent deficit for all who *would have been* `'Overdue'`.
+        *   Repeat for Week -2 and Week -3.
+        *   Display as a bar chart.
+    3.  **Metric: Tenant Reliability Rate (Average Days Paid Late):**
+        *   For each tenant, iterate through their payment history.
+        *   For each payment, calculate the difference in days between `payment_date` and the `next_due_date` of the *previous* payment.
+        *   Average these differences to get a reliability score for each tenant (negative is good, positive is bad).
+        *   Display a ranked list of tenants from most to least reliable.
+    4.  **Metric: Rooms Nearing Contract Expiry:**
+        *   This is the same query as in Algorithm C, Stage 3.
+        *   `COUNT` all tenants where `contract_end_date` is within the next 60 days.
+        *   Display this count as a key performance indicator (KPI) on the dashboard.
+
+*   **OUTPUT:**
+    *   A rich, data-driven dashboard that provides the landlord with actionable business intelligence, not just raw numbers.
