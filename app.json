@@ -8,17 +8,15 @@
     "scheme": "rentaltrack",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-
-     "splash": {
+    "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff",
       "dark": {
-        "image": "./assets/images/splash.png", 
+        "image": "./assets/images/splash.png",
         "backgroundColor": "#000000"
       }
     },
-    
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
@@ -33,7 +31,6 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
-    
     "plugins": [
       "expo-router",
       "expo-sqlite"
@@ -54,9 +51,9 @@
     "updates": {
       "url": "https://u.expo.dev/8c12112f-518d-4393-a1a1-b6c1a5ec4cb6",
       "fallbackToCacheTimeout": 0,
-      "checkAutomatically": "ON_LOAD", 
+      "checkAutomatically": "ON_LOAD",
       "enabled": true,
-      "codeSigningCertificate": "./code-signing/certificate.pem",
+      "codeSigningCertificate": "./certs/certificate.pem",
       "codeSigningMetadata": {
         "keyid": "main",
         "alg": "rsa-v1_5-sha256"

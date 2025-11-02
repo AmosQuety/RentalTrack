@@ -1,1 +1,3 @@
 is the rent calculations robust i.e cover almost all scenarios
+
+npx expo-updates codesigning:generate --key-output-directory ../keys --certificate-output-directory certs --certificate-validity-duration-years 10 --certificate-common-name "RentalTrack"
