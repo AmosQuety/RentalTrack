@@ -220,77 +220,54 @@ export default function SettingsScreen() {
       </View>
 
       {/* General Settings */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>General</Text>
-        
-        <View style={styles.settingGroup}>
-          <Text style={styles.settingLabel}>Currency</Text>
-          <View style={styles.optionsContainer}>
-            {['UGX', 'USD', 'EUR', 'KES', 'TZS'].map(currency => (
-              <TouchableOpacity
-                key={currency}
-                onPress={() => updateSetting('currency', currency)}
-                style={[
-                  styles.optionButton,
-                  settings.currency === currency && styles.optionButtonSelected
-                ]}
-              >
-                <Text style={[
-                  styles.optionText,
-                  settings.currency === currency && styles.optionTextSelected
-                ]}>
-                  {currency}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
+<View style={styles.section}>
+  <Text style={styles.sectionTitle}>General</Text>
+  
+  {/* REMOVED: Currency and Theme settings */}
+  <View style={styles.settingGroup}>
+    <Text style={styles.settingLabel}>Auto-Suspend After (Days)</Text>
+    <View style={styles.optionsContainer}>
+      {[15, 30, 45, 60].map(days => (
+        <TouchableOpacity
+          key={days}
+          onPress={() => updateSetting('auto_suspend_days', days)}
+          style={[
+            styles.optionButton,
+            settings.auto_suspend_days === days && styles.optionButtonSelected
+          ]}
+        >
+          <Text style={[
+            styles.optionText,
+            settings.auto_suspend_days === days && styles.optionTextSelected
+          ]}>
+            {days} days
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  </View>
 
-        <View style={styles.settingGroup}>
-          <Text style={styles.settingLabel}>Theme</Text>
-          <View style={styles.optionsContainer}>
-            {['Light', 'Dark', 'Auto'].map(theme => (
-              <TouchableOpacity
-                key={theme}
-                onPress={() => updateSetting('theme', theme)}
-                style={[
-                  styles.optionButton,
-                  settings.theme === theme && styles.optionButtonSelected
-                ]}
-              >
-                <Text style={[
-                  styles.optionText,
-                  settings.theme === theme && styles.optionTextSelected
-                ]}>
-                  {theme}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      </View>
-
-      {/* Auto-Suspension Settings */}
-<View style={styles.settingGroup}>
-  <Text style={styles.settingLabel}>Auto-Suspend After (Days)</Text>
-  <View style={styles.optionsContainer}>
-    {[15, 30, 45, 60].map(days => (
-      <TouchableOpacity
-        key={days}
-        onPress={() => updateSetting('auto_suspend_days', days)}
-        style={[
-          styles.optionButton,
-          settings.auto_suspend_days === days && styles.optionButtonSelected
-        ]}
-      >
-        <Text style={[
-          styles.optionText,
-          settings.auto_suspend_days === days && styles.optionTextSelected
-        ]}>
-          {days} days
-        </Text>
-      </TouchableOpacity>
-    ))}
+  <View style={styles.settingGroup}>
+    <Text style={styles.settingLabel}>Contract Reminder (Days Before)</Text>
+    <View style={styles.optionsContainer}>
+      {[30, 60, 90].map(days => (
+        <TouchableOpacity
+          key={days}
+          onPress={() => updateSetting('contract_reminder_days', days)}
+          style={[
+            styles.optionButton,
+            settings.contract_reminder_days === days && styles.optionButtonSelected
+          ]}
+        >
+          <Text style={[
+            styles.optionText,
+            settings.contract_reminder_days === days && styles.optionTextSelected
+          ]}>
+            {days} days
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
   </View>
 </View>
 
