@@ -1,4 +1,4 @@
-// app/edit-tenant.tsx
+// app/edit-tenant.tsx - UPDATED
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import DateInput from "../components/DateInput"; // NEW IMPORT
 import { useDatabase } from "../hooks/use-db";
 
 const InputField = ({
@@ -55,6 +56,8 @@ export default function EditTenant() {
     roomNumber: "",
     startDate: "",
     monthlyRent: "",
+    rentCycle: "monthly" as 'monthly' | 'biweekly' | 'quarterly',
+    contractEndDate: "",
     notes: "",
   });
 
@@ -73,6 +76,8 @@ export default function EditTenant() {
           roomNumber: tenant.room_number,
           startDate: tenant.start_date,
           monthlyRent: tenant.monthly_rent.toString(),
+          rentCycle: tenant.rent_cycle || "monthly",
+          contractEndDate: tenant.contract_end_date || "",
           notes: tenant.notes || "",
         });
       }
@@ -107,15 +112,26 @@ export default function EditTenant() {
     return;
   }
 
+    // Validate contract dates
+    if (formData.contractEndDate && formData.startDate > formData.contractEndDate) {
+      Alert.alert(
+        "Invalid Dates",
+        "Contract end date must be after move-in date.",
+        [{ text: "OK", style: "default" }]
+      );
+      return;
+    }
+
     setIsLoading(true);
     try {
-      // We need to add updateTenant function to our database service
       await updateTenant(parseInt(tenantId as string), {
         name: formData.name.trim(),
         phone: formData.phone.trim(),
         roomNumber: formData.roomNumber.trim(),
         startDate: formData.startDate,
         monthlyRent: parseFloat(formData.monthlyRent),
+        rentCycle: formData.rentCycle,
+        contractEndDate: formData.contractEndDate,
         notes: formData.notes.trim()
       });
       
@@ -218,13 +234,49 @@ export default function EditTenant() {
             icon={<Ionicons name="cash-outline" size={20} color="#6B7280" />}
           />
 
-          <InputField
+          {/* NEW: Date Inputs */}
+          <DateInput
             label="Move-in Date"
             value={formData.startDate}
-            onChange={(text) => setFormData((prev) => ({ ...prev, startDate: text }))}
-            placeholder="YYYY-MM-DD"
-            icon={<Ionicons name="calendar-outline" size={20} color="#6B7280" />}
+            onChange={(isoDate) => setFormData((prev) => ({ ...prev, startDate: isoDate }))}
+            required
+            maxDate={new Date()} // Move-in date shouldn't be in future
+            placeholder="DD/MM/YYYY"
           />
+
+          <DateInput
+            label="Contract End Date"
+            value={formData.contractEndDate}
+            onChange={(isoDate) => setFormData((prev) => ({ ...prev, contractEndDate: isoDate }))}
+            minDate={new Date(formData.startDate)} // End date after start date
+            placeholder="DD/MM/YYYY (optional)"
+          />
+
+          {/* Rent Cycle Selector */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>
+              Rent Cycle <Text style={styles.required}>*</Text>
+            </Text>
+            <View style={styles.cycleOptions}>
+              {['monthly', 'biweekly', 'quarterly'].map(cycle => (
+                <TouchableOpacity
+                  key={cycle}
+                  onPress={() => setFormData(prev => ({ ...prev, rentCycle: cycle as any }))}
+                  style={[
+                    styles.cycleOption,
+                    formData.rentCycle === cycle && styles.cycleOptionSelected
+                  ]}
+                >
+                  <Text style={[
+                    styles.cycleOptionText,
+                    formData.rentCycle === cycle && styles.cycleOptionTextSelected
+                  ]}>
+                    {cycle.charAt(0).toUpperCase() + cycle.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
 
           <InputField
             label="Notes"
@@ -264,6 +316,7 @@ export default function EditTenant() {
   );
 }
 
+// Your existing styles remain exactly the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -417,20 +470,29 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
+  cycleOptions: {
+  flexDirection: 'row',
+  gap: 8,
+  },
+  cycleOption: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  cycleOptionSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  cycleOptionText: {
+    fontSize: 14,
+    color: '#374151',
+    fontWeight: '500',
+  },
+  cycleOptionTextSelected: {
+    color: '#FFFFFF',
+  },
 });
-
-// app/add-tenant.tsx and app/edit-tenant.tsx
-// Logic:
-// Uses a reusable InputField component, which is good for modularity.
-// Input validation for required fields and numeric rent.
-// Handles loading states for form submission.
-// EditTenant correctly loads existing data.
-// Error messages for duplicate room numbers are specific, which is excellent.
-// Improvements for Production:
-// Form Validation Library: For complex forms, consider a library like Formik with Yup for schema validation. This centralizes validation logic and simplifies error display.
-// Date Picker: For startDate, a native date picker (@react-native-community/datetimepicker or expo-datetimepicker) would be significantly better than a plain text input. This prevents invalid date formats.
-// Phone Number Formatting: Auto-format phone numbers as users type for a better UX.
-// Error Display: Instead of just Alert.alert, display validation errors directly below the input fields.
-// trim() on Input: You're doing .trim() on submission, which is good. Consider doing it on onChangeText as well if leading/trailing spaces affect display or intermediate logic.
-// keyboardType="numeric" vs decimal-pad: For rent, decimal-pad might be more appropriate if decimal amounts are allowed.
-// Input Field Icons: The icon implementation is good.

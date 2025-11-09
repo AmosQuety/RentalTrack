@@ -216,6 +216,22 @@ export default function TenantDetails() {
           <Text style={styles.detailLabel}>Monthly Rent:</Text>
           <Text style={styles.detailValue}>{tenant.monthly_rent.toLocaleString()} UGX</Text>
         </View>
+        
+<View style={styles.detailRow}>
+  <Text style={styles.detailLabel}>Rent Cycle:</Text>
+  <Text style={styles.detailValue}>
+    {tenant.rent_cycle ? tenant.rent_cycle.charAt(0).toUpperCase() + tenant.rent_cycle.slice(1) : 'Monthly'}
+  </Text>
+</View>
+
+{tenant.contract_end_date && (
+  <View style={styles.detailRow}>
+    <Text style={styles.detailLabel}>Contract End:</Text>
+    <Text style={styles.detailValue}>
+      {new Date(tenant.contract_end_date).toLocaleDateString()}
+    </Text>
+  </View>
+)}
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Move-in Date:</Text>
           <Text style={styles.detailValue}>
@@ -320,15 +336,7 @@ export default function TenantDetails() {
           })
         )}
       </View>
-      {/* Debug Info - Remove this after testing */}
-<View style={{ backgroundColor: '#FFFBEB', padding: 12, margin: 16, borderRadius: 8 }}>
-  <Text style={{ fontWeight: 'bold', marginBottom: 8 }}>Debug Info:</Text>
-  <Text>Status: {tenant.status}</Text>
-  <Text>Monthly Rent: {tenant.monthly_rent.toLocaleString()}</Text>
-  <Text>Credit Balance: {tenant.credit_balance.toLocaleString()}</Text>
-  <Text>Balance Due: {(tenant.monthly_rent - tenant.credit_balance).toLocaleString()}</Text>
-  <Text>Should Show Red: {(tenant.status === 'Due Soon' || tenant.status === 'Overdue') && (tenant.monthly_rent - tenant.credit_balance) > 0 ? 'YES' : 'NO'}</Text>
-</View>
+   
     </ScrollView>
   );
 }

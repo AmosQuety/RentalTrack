@@ -1,41 +1,31 @@
-// app/_layout.tsx
+// app/_layout.tsx - PRODUCTION-SAFE VERSION
 import * as NavigationBar from 'expo-navigation-bar';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import * as Updates from 'expo-updates';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, AppState, AppStateStatus, Platform, View } from 'react-native';
+import { Alert, AppState, AppStateStatus, Platform, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { NotificationService } from '../services/notifications';
 
-// Keep the splash screen visible while we fetch resources
 SplashScreen.preventAutoHideAsync();
-
-// Update check retry configuration
-const UPDATE_RETRY_CONFIG = {
-  maxRetries: 3,
-  retryDelay: 2000, // 2 seconds
-  timeout: 10000, // 10 seconds
-};
 
 export default function RootLayout() {
   const router = useRouter();
   const [isUpdateChecking, setIsUpdateChecking] = useState(false);
   const [appIsReady, setAppIsReady] = useState(false);
+  const [criticalError, setCriticalError] = useState<string | null>(null);
 
-  // Enhanced update check with retry logic
   const checkForUpdates = async (retryCount = 0): Promise<void> => {
-    if (__DEV__ || isUpdateChecking) {
-      return;
-    }
+    if (__DEV__ || isUpdateChecking) return;
 
     setIsUpdateChecking(true);
 
     try {
-      // Add timeout to prevent hanging
       const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Update check timeout')), UPDATE_RETRY_CONFIG.timeout)
+        setTimeout(() => reject(new Error('Update check timeout')), 10000)
       );
 
       const updatePromise = Updates.checkForUpdateAsync();
@@ -44,12 +34,10 @@ export default function RootLayout() {
       if (update.isAvailable) {
         console.log('📦 Update available, downloading...');
         
-        // Download update silently first
         try {
           await Updates.fetchUpdateAsync();
           console.log('✅ Update downloaded successfully');
           
-          // Show restart dialog with better UX
           Alert.alert(
             'Update Ready',
             'A new version has been downloaded. Restart now to enjoy the latest features?',
@@ -58,7 +46,6 @@ export default function RootLayout() {
                 text: 'Later',
                 style: 'cancel',
                 onPress: () => {
-                  // Schedule reminder for next app launch
                   console.log('Update deferred by user');
                 },
               },
@@ -68,7 +55,6 @@ export default function RootLayout() {
                 onPress: () => {
                   Updates.reloadAsync().catch(error => {
                     console.error('Failed to reload app:', error);
-                    // Fallback: show manual restart instruction
                     Alert.alert(
                       'Restart Required',
                       'Please completely close and reopen the app to apply the update.',
@@ -81,7 +67,6 @@ export default function RootLayout() {
           );
         } catch (downloadError) {
           console.error('❌ Update download failed:', downloadError);
-          // Don't show error to user for failed download - will retry next time
         }
       } else {
         console.log('✅ App is up to date');
@@ -89,9 +74,9 @@ export default function RootLayout() {
     } catch (error) {
       console.error(`❌ Update check failed (attempt ${retryCount + 1}):`, error);
       
-      if (retryCount < UPDATE_RETRY_CONFIG.maxRetries - 1) {
-        console.log(`🔄 Retrying update check in ${UPDATE_RETRY_CONFIG.retryDelay}ms...`);
-        setTimeout(() => checkForUpdates(retryCount + 1), UPDATE_RETRY_CONFIG.retryDelay);
+      if (retryCount < 2) {
+        console.log(`🔄 Retrying update check in 2s...`);
+        setTimeout(() => checkForUpdates(retryCount + 1), 2000);
       } else {
         console.log('⚠️ All update check attempts failed');
       }
@@ -100,27 +85,26 @@ export default function RootLayout() {
     }
   };
 
-  // Load resources and prepare app
   useEffect(() => {
     async function prepare() {
       try {
-        // Pre-load fonts, make API calls, etc.
-        await Promise.all([
-          // Add your font loading here if any
-          // Font.loadAsync(...),
-          
-          // Initial update check (non-blocking)
+        console.log('🚀 Preparing app...');
+        
+        // CRITICAL: Only check for updates, don't wait for it
+        if (!__DEV__) {
           checkForUpdates().catch(error => {
             console.error('Initial update check failed:', error);
-          }),
-          
-          // Simulate minimum splash screen time (optional)
-          new Promise(resolve => setTimeout(resolve, 1000)),
-        ]);
+          });
+        }
+        
+        // Minimum splash screen time
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        console.log('✅ App prepared');
       } catch (e) {
-        console.warn(e);
+        console.error('❌ App preparation failed:', e);
+        setCriticalError(e instanceof Error ? e.message : 'Unknown error');
       } finally {
-        // Tell the application to render
         setAppIsReady(true);
       }
     }
@@ -128,23 +112,15 @@ export default function RootLayout() {
     prepare();
   }, []);
 
-  // Hide splash screen when app is ready
   const onLayoutRootView = useCallback(async () => {
     if (appIsReady) {
       await SplashScreen.hideAsync();
     }
   }, [appIsReady]);
 
-  // Don't render anything until app is ready
-  if (!appIsReady) {
-    return null;
-  }
-
-  // Check for updates when app comes to foreground
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'active') {
-        // Check for updates when app returns to foreground (with delay to avoid conflicts)
+      if (nextAppState === 'active' && !__DEV__) {
         setTimeout(() => {
           checkForUpdates();
         }, 1000);
@@ -158,11 +134,8 @@ export default function RootLayout() {
     };
   }, []);
 
-  // Enhanced EAS Updates listener with better error handling
   useEffect(() => {
-    if (__DEV__) {
-      return;
-    }
+    if (__DEV__) return;
 
     let updateListener: any = null;
 
@@ -172,7 +145,6 @@ export default function RootLayout() {
           switch (updateEvent.type) {
             case Updates.UpdateEventType.UPDATE_AVAILABLE:
               console.log('📦 Background update available');
-              // Auto-download in background without user interaction
               Updates.fetchUpdateAsync().then(() => {
                 console.log('✅ Background update downloaded successfully');
               }).catch(error => {
@@ -180,28 +152,15 @@ export default function RootLayout() {
               });
               break;
 
-            case Updates.UpdateEventType.UPDATE_NOT_AVAILABLE:
-              console.log('✅ No updates available (background check)');
-              break;
-
             case Updates.UpdateEventType.ERROR:
               console.error('❌ Update error:', updateEvent.message);
               break;
-
-            case Updates.UpdateEventType.NO_UPDATE_AVAILABLE:
-              console.log('✅ No updates available');
-              break;
-
-            default:
-              console.log('🔧 Unknown update event:', updateEvent.type);
           }
         });
 
         console.log('✅ EAS Updates listener registered');
       } catch (error) {
         console.error('❌ Failed to setup update listener:', error);
-        
-        // Retry listener setup after delay
         setTimeout(setupUpdateListener, 5000);
       }
     };
@@ -220,7 +179,6 @@ export default function RootLayout() {
     };
   }, []);
 
-  // Navigation Bar Styling (Android only) - unchanged
   useEffect(() => {
     const styleNavigationBar = async () => {
       if (Platform.OS === 'android') {
@@ -231,7 +189,7 @@ export default function RootLayout() {
             console.log('✅ Navigation bar styled successfully');
           }
         } catch (error) {
-          console.log('⚠️ Navigation bar styling not available (edge-to-edge or Expo Go)');
+          console.log('⚠️ Navigation bar styling not available');
         }
       }
     };
@@ -239,7 +197,6 @@ export default function RootLayout() {
     styleNavigationBar();
   }, []);
 
-  // CRITICAL: Handle notification actions (Mark as Paid, Snooze, etc.) - unchanged
   useEffect(() => {
     const removeHandler = NotificationService.setupNotificationResponseHandler(async (response) => {
       const { actionIdentifier, notification } = response;
@@ -305,7 +262,6 @@ export default function RootLayout() {
     return removeHandler;
   }, [router]);
 
-  // Optional: Handle notifications when app is in foreground - unchanged
   useEffect(() => {
     const removeForegroundHandler = NotificationService.setupForegroundNotificationHandler((notification) => {
       console.log('📬 Notification received in foreground:', notification.request.content.title);
@@ -314,46 +270,68 @@ export default function RootLayout() {
     return removeForegroundHandler;
   }, []);
 
-  return (
-    <SafeAreaProvider>
-      <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
-        <StatusBar style="dark" translucent={false} />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen 
-            name="tenant-details" 
-            options={{ 
-              title: 'Tenant Details',
-              headerShown: true,
-              headerBackTitle: 'Back'
-            }} 
-          />
-          <Stack.Screen 
-            name="record-payment" 
-            options={{ 
-              title: 'Record Payment',
-              headerShown: true,
-              headerBackTitle: 'Back'
-            }} 
-          />
-          <Stack.Screen 
-            name="add-tenant" 
-            options={{ 
-              title: 'Add Tenant',
-              headerShown: true,
-              headerBackTitle: 'Back'
-            }} 
-          />
-          <Stack.Screen 
-            name="edit-tenant" 
-            options={{ 
-              title: 'Edit Tenant',
-              headerShown: true,
-              headerBackTitle: 'Back'
-            }} 
-          />
-        </Stack>
+  if (!appIsReady) {
+    return null;
+  }
+
+  if (criticalError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10, color: '#EF4444' }}>
+          🚨 Critical Error
+        </Text>
+        <Text style={{ textAlign: 'center', marginBottom: 20 }}>
+          The app encountered a critical error during startup. Please restart the app.
+        </Text>
+        <Text style={{ fontSize: 12, color: '#6B7280', textAlign: 'center' }}>
+          {criticalError}
+        </Text>
       </View>
-    </SafeAreaProvider>
+    );
+  }
+
+  return (
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+          <StatusBar style="dark" translucent={false} />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen 
+              name="tenant-details" 
+              options={{ 
+                title: 'Tenant Details',
+                headerShown: true,
+                headerBackTitle: 'Back'
+              }} 
+            />
+            <Stack.Screen 
+              name="record-payment" 
+              options={{ 
+                title: 'Record Payment',
+                headerShown: true,
+                headerBackTitle: 'Back'
+              }} 
+            />
+            <Stack.Screen 
+              name="add-tenant" 
+              options={{ 
+                title: 'Add Tenant',
+                headerShown: false,
+                headerBackTitle: 'Back'
+              }} 
+            />
+            <Stack.Screen 
+              name="edit-tenant" 
+              options={{ 
+                title: 'Edit Tenant',
+                headerShown: true,
+                headerBackTitle: 'Back'
+              }} 
+            />
+          </Stack>
+        </View>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }

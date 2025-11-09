@@ -1,11 +1,21 @@
-// app/record-payment.tsx - CORRECTED VERSION
+// app/record-payment.tsx - CLEANED AND ORGANIZED VERSION
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import DateInput from '../components/DateInput';
 import { useDatabase } from '../hooks/use-db';
 import { Tenant } from '../libs/types';
 
-const InputField = ({ label, value, onChange, placeholder, keyboardType = 'default', required = false, multiline = false }) => (
+// Reusable InputField component
+const InputField = ({ 
+  label, 
+  value, 
+  onChange, 
+  placeholder, 
+  keyboardType = 'default', 
+  required = false, 
+  multiline = false 
+}) => (
   <View style={styles.inputContainer}>
     <Text style={styles.inputLabel}>
       {label} {required && <Text style={styles.required}>*</Text>}
@@ -24,6 +34,17 @@ const InputField = ({ label, value, onChange, placeholder, keyboardType = 'defau
   </View>
 );
 
+// Payment summary interface for better type safety
+interface PaymentSummary {
+  fullMonths: number;
+  remainingAmount: number;
+  nextDueDate: string;
+  currentCredit: number;
+  totalAvailable: number;
+  willBeFullyPaid: boolean;
+  balanceDue: number;
+}
+
 export default function RecordPayment() {
   const { tenantId, prefillAmount } = useLocalSearchParams();
   const router = useRouter();
@@ -32,13 +53,12 @@ export default function RecordPayment() {
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [formData, setFormData] = useState({
     amount: prefillAmount ? String(prefillAmount) : '',
-    paymentDate: new Date().toISOString().split('T')[0],
+    paymentDate: '',
     paymentMethod: 'Cash',
     notes: ''
   });
   const [isLoading, setIsLoading] = useState(false);
-
-  const [paymentSummary, setPaymentSummary] = useState({
+  const [paymentSummary, setPaymentSummary] = useState<PaymentSummary>({
     fullMonths: 0,
     remainingAmount: 0,
     nextDueDate: '',
@@ -48,23 +68,9 @@ export default function RecordPayment() {
     balanceDue: 0
   });
 
-  const loadTenant = async () => {
-    if (!tenantId || !isInitialized) return;
-    
-    try {
-      const tenantData = await getTenant(parseInt(tenantId as string));
-      setTenant(tenantData);
-      
-      // Update payment summary with current credit
-      if (tenantData && formData.amount) {
-        calculatePaymentSummary(tenantData, parseFloat(formData.amount));
-      }
-    } catch (error) {
-      console.error('Failed to load tenant:', error);
-      Alert.alert('Error', 'Failed to load tenant details');
-    }
-  };
+  const paymentMethods = ['Cash', 'Mobile Money', 'Bank Transfer', 'Other'];
 
+  // Calculate payment summary
   const calculatePaymentSummary = (tenantData: Tenant, amount: number) => {
     if (!isNaN(amount) && tenantData.monthly_rent > 0) {
       const currentCredit = tenantData.credit_balance || 0;
@@ -73,11 +79,9 @@ export default function RecordPayment() {
       const remaining = totalAvailable % tenantData.monthly_rent;
       
       // Calculate next due date
-      const lastPaymentDate = new Date();
-      const nextDue = new Date(lastPaymentDate);
+      const nextDue = new Date();
       nextDue.setMonth(nextDue.getMonth() + fullMonths);
       
-      // Calculate if this payment will make the tenant fully paid
       const willBeFullyPaid = remaining === 0 && fullMonths > 0;
       const balanceDue = tenantData.monthly_rent - remaining;
       
@@ -88,38 +92,41 @@ export default function RecordPayment() {
         currentCredit,
         totalAvailable,
         willBeFullyPaid,
-        balanceDue: remaining > 0 ? 0 : balanceDue // Only show balance due if not enough for full month
+        balanceDue: remaining > 0 ? 0 : balanceDue
       });
     }
   };
 
-  // Handle prefill amount
-  useEffect(() => {
-    if (prefillAmount && !formData.amount) {
-      setFormData(prev => ({ ...prev, amount: prefillAmount.toString() }));
-    }
-  }, [prefillAmount]);
-
-  // Calculate payment summary when amount changes
-  useEffect(() => {
-    if (formData.amount && tenant) {
-      const amount = parseFloat(formData.amount);
-      calculatePaymentSummary(tenant, amount);
-    }
-  }, [formData.amount, tenant]);
-
   // Load tenant data
-  useEffect(() => {
-    loadTenant();
-  }, [tenantId, isInitialized]);
+  const loadTenantData = async () => {
+    if (!tenantId || !isInitialized) return;
+    
+    try {
+      const tenantData = await getTenant(parseInt(tenantId as string));
+      setTenant(tenantData);
+      
+      // Set default payment date to today
+      const today = new Date().toISOString().split('T')[0];
+      setFormData(prev => ({ ...prev, paymentDate: today }));
+      
+      // Calculate initial payment summary if amount exists
+      if (tenantData && formData.amount) {
+        calculatePaymentSummary(tenantData, parseFloat(formData.amount));
+      }
+    } catch (error) {
+      console.error('Failed to load tenant:', error);
+      Alert.alert('Error', 'Failed to load tenant details');
+    }
+  };
 
+  // Handle payment recording
   const handleRecordPayment = async () => {
+    // Validation
     if (!formData.amount || !formData.paymentDate) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
 
-    
     const amount = parseFloat(formData.amount);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert('Error', 'Please enter a valid amount');
@@ -153,9 +160,6 @@ export default function RecordPayment() {
         notes: formData.notes
       });
 
-    
-
-
       Alert.alert('Success', 'Payment recorded successfully!', [
         { text: 'OK', onPress: () => router.back() }
       ]);
@@ -167,15 +171,113 @@ export default function RecordPayment() {
     }
   };
 
-  const paymentMethods = ['Cash', 'Mobile Money', 'Bank Transfer', 'Other'];
+  // Effects
+  useEffect(() => {
+    if (prefillAmount && !formData.amount) {
+      setFormData(prev => ({ ...prev, amount: prefillAmount.toString() }));
+    }
+  }, [prefillAmount]);
 
+  useEffect(() => {
+    if (formData.amount && tenant) {
+      const amount = parseFloat(formData.amount);
+      calculatePaymentSummary(tenant, amount);
+    }
+  }, [formData.amount, tenant]);
+
+  useEffect(() => {
+    loadTenantData();
+  }, [tenantId, isInitialized]);
+
+  // Render loading state
   if (!tenant) {
     return (
       <View style={styles.centerContainer}>
-        <Text>Loading...</Text>
+        <Text>Loading tenant information...</Text>
       </View>
     );
   }
+
+  // Render payment summary section
+  const renderPaymentSummary = () => {
+    if (!formData.amount || !tenant) return null;
+
+    return (
+      <View style={styles.paymentSummary}>
+        <Text style={styles.paymentSummaryTitle}>Payment Summary</Text>
+        
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Current Credit:</Text>
+          <Text style={styles.summaryValue}>
+            {paymentSummary.currentCredit.toLocaleString()} UGX
+          </Text>
+        </View>
+        
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>New Payment:</Text>
+          <Text style={styles.summaryValue}>
+            {parseFloat(formData.amount).toLocaleString()} UGX
+          </Text>
+        </View>
+        
+        <View style={[styles.summaryRow, styles.totalRow]}>
+          <Text style={[styles.summaryLabel, styles.totalLabel]}>Total Available:</Text>
+          <Text style={[styles.summaryValue, styles.totalValue]}>
+            {paymentSummary.totalAvailable.toLocaleString()} UGX
+          </Text>
+        </View>
+        
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Full Months Covered:</Text>
+          <Text style={styles.summaryValue}>{paymentSummary.fullMonths} months</Text>
+        </View>
+        
+        {paymentSummary.remainingAmount > 0 ? (
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>New Credit Balance:</Text>
+            <Text style={[styles.summaryValue, { color: '#10B981' }]}>
+              {paymentSummary.remainingAmount.toLocaleString()} UGX
+            </Text>
+          </View>
+        ) : paymentSummary.balanceDue > 0 ? (
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Balance Due:</Text>
+            <Text style={[styles.summaryValue, { color: '#EF4444', fontWeight: 'bold' }]}>
+              {paymentSummary.balanceDue.toLocaleString()} UGX
+            </Text>
+          </View>
+        ) : null}
+        
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Next Due Date:</Text>
+          <Text style={styles.summaryValue}>
+            {new Date(paymentSummary.nextDueDate).toLocaleDateString()}
+          </Text>
+        </View>
+
+        {/* Status Preview */}
+        <View style={[
+          styles.statusPreview,
+          { 
+            backgroundColor: paymentSummary.willBeFullyPaid ? '#10B98120' : 
+                           paymentSummary.remainingAmount > 0 ? '#10B98120' : '#F59E0B20' 
+          }
+        ]}>
+          <Text style={[
+            styles.statusPreviewText,
+            { 
+              color: paymentSummary.willBeFullyPaid ? '#10B981' : 
+                     paymentSummary.remainingAmount > 0 ? '#10B981' : '#F59E0B' 
+            }
+          ]}>
+            {paymentSummary.willBeFullyPaid ? '✅ Tenant will be fully paid' :
+             paymentSummary.remainingAmount > 0 ? '💰 Tenant will have credit' : 
+             '⚠️ Tenant will still have balance due'}
+          </Text>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <ScrollView style={styles.container}>
@@ -183,7 +285,7 @@ export default function RecordPayment() {
         <Text style={styles.title}>Record Payment</Text>
         <Text style={styles.subtitle}>for {tenant.name} (Room {tenant.room_number})</Text>
 
-        {/* Tenant Info */}
+        {/* Tenant Info Card */}
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>Tenant Information</Text>
           <View style={styles.infoRow}>
@@ -211,6 +313,7 @@ export default function RecordPayment() {
 
         {/* Payment Form */}
         <View style={styles.formCard}>
+          {/* Amount Field */}
           <InputField
             label="Amount Paid (UGX)"
             value={formData.amount}
@@ -220,89 +323,20 @@ export default function RecordPayment() {
             required
           />
 
-          {formData.amount && tenant && (
-            <View style={styles.paymentSummary}>
-              <Text style={styles.paymentSummaryTitle}>Payment Summary</Text>
-              
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Current Credit:</Text>
-                <Text style={styles.summaryValue}>
-                  {paymentSummary.currentCredit.toLocaleString()} UGX
-                </Text>
-              </View>
-              
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>New Payment:</Text>
-                <Text style={styles.summaryValue}>
-                  {parseFloat(formData.amount).toLocaleString()} UGX
-                </Text>
-              </View>
-              
-              <View style={[styles.summaryRow, styles.totalRow]}>
-                <Text style={[styles.summaryLabel, styles.totalLabel]}>Total Available:</Text>
-                <Text style={[styles.summaryValue, styles.totalValue]}>
-                  {paymentSummary.totalAvailable.toLocaleString()} UGX
-                </Text>
-              </View>
-              
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Full Months Covered:</Text>
-                <Text style={styles.summaryValue}>{paymentSummary.fullMonths} months</Text>
-              </View>
-              
-              {paymentSummary.remainingAmount > 0 ? (
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>New Credit Balance:</Text>
-                  <Text style={[styles.summaryValue, { color: '#10B981' }]}>
-                    {paymentSummary.remainingAmount.toLocaleString()} UGX
-                  </Text>
-                </View>
-              ) : paymentSummary.balanceDue > 0 ? (
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Balance Due:</Text>
-                  <Text style={[styles.summaryValue, { color: '#EF4444', fontWeight: 'bold' }]}>
-                    {paymentSummary.balanceDue.toLocaleString()} UGX
-                  </Text>
-                </View>
-              ) : null}
-              
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Next Due Date:</Text>
-                <Text style={styles.summaryValue}>
-                  {new Date(paymentSummary.nextDueDate).toLocaleDateString()}
-                </Text>
-              </View>
+          {/* Payment Summary */}
+          {renderPaymentSummary()}
 
-              {/* Status Preview */}
-              <View style={[
-                styles.statusPreview,
-                { 
-                  backgroundColor: paymentSummary.willBeFullyPaid ? '#10B98120' : 
-                                 paymentSummary.remainingAmount > 0 ? '#10B98120' : '#F59E0B20' 
-                }
-              ]}>
-                <Text style={[
-                  styles.statusPreviewText,
-                  { 
-                    color: paymentSummary.willBeFullyPaid ? '#10B981' : 
-                           paymentSummary.remainingAmount > 0 ? '#10B981' : '#F59E0B' 
-                  }
-                ]}>
-                  {paymentSummary.willBeFullyPaid ? '✅ Tenant will be fully paid' :
-                   paymentSummary.remainingAmount > 0 ? '💰 Tenant will have credit' : 
-                   '⚠️ Tenant will still have balance due'}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          <InputField
+          {/* Date Input Component */}
+          <DateInput
             label="Payment Date"
             value={formData.paymentDate}
-            onChange={(text) => setFormData(prev => ({ ...prev, paymentDate: text }))}
-            placeholder="YYYY-MM-DD"
+            onChange={(isoDate) => setFormData(prev => ({ ...prev, paymentDate: isoDate }))}
+            required
+            maxDate={new Date()} // Cannot select future dates for payments
+            placeholder="DD/MM/YYYY or tap calendar"
           />
 
+          {/* Payment Method */}
           <View style={styles.methodContainer}>
             <Text style={styles.methodLabel}>Payment Method</Text>
             <View style={styles.methodOptions}>
@@ -326,6 +360,7 @@ export default function RecordPayment() {
             </View>
           </View>
 
+          {/* Notes */}
           <InputField
             label="Notes"
             value={formData.notes}
@@ -334,6 +369,7 @@ export default function RecordPayment() {
             multiline
           />
 
+          {/* Action Buttons */}
           <TouchableOpacity
             onPress={handleRecordPayment}
             disabled={isLoading}

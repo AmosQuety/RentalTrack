@@ -41,7 +41,6 @@ yarn-error.*
 
 # macOS
 .DS_Store
-*.pem
 .AppleDouble
 .LSOverride
 

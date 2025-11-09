@@ -1,9 +1,9 @@
-// hooks/use-db.ts - ENHANCED VERSION
+// hooks/use-db.ts - COMPLETE VERSION
 import { useCallback, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 import { Database, initializeDatabase } from '../db/database';
 import { NotificationService } from '../services/notifications';
 
-// Event emitter for database changes
 type DatabaseEventType = 'tenant_added' | 'tenant_updated' | 'tenant_deleted' | 'payment_recorded' | 'settings_updated';
 type DatabaseEventListener = () => void;
 
@@ -16,7 +16,6 @@ class DatabaseEventEmitter {
     }
     this.listeners.get(event)!.add(listener);
 
-    // Return unsubscribe function
     return () => {
       this.listeners.get(event)?.delete(listener);
     };
@@ -39,6 +38,7 @@ export const dbEvents = new DatabaseEventEmitter();
 export const useDatabase = () => {
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [initAttempts, setInitAttempts] = useState(0);
   const [heartbeatResults, setHeartbeatResults] = useState<{
     statusUpdates: number;
     suspensionAlerts: string[];
@@ -48,29 +48,94 @@ export const useDatabase = () => {
   useEffect(() => {
     const initApp = async () => {
       try {
-        await initializeDatabase();
-        await NotificationService.initialize();
+        console.log('🚀 Starting app initialization...');
+        
+        // CRITICAL: Add timeout to prevent infinite hanging
+        const initTimeout = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Database initialization timeout')), 30000)
+        );
 
-        // NEW: Run system heartbeat on app start
-        const results = await Database.runSystemHeartbeat();
-        setHeartbeatResults(results);
+        await Promise.race([
+          initializeDatabase(),
+          initTimeout
+        ]);
         
-        // NEW: Update tenant statuses on app start
-        await Database.updateAllTenantStatuses();
-        await NotificationService.checkPendingReminders();
+        console.log('✅ Database initialized');
+
+        // Initialize notifications (non-blocking)
+        try {
+          await NotificationService.initialize();
+          console.log('✅ Notifications initialized');
+        } catch (notifError) {
+          console.warn('⚠️ Notification initialization failed (non-critical):', notifError);
+        }
+
+        // Run system heartbeat (non-blocking)
+        try {
+          const results = await Database.runSystemHeartbeat();
+          setHeartbeatResults(results);
+          console.log('✅ System heartbeat completed');
+        } catch (heartbeatError) {
+          console.warn('⚠️ Heartbeat failed (non-critical):', heartbeatError);
+        }
         
+        // Update tenant statuses (non-blocking)
+        try {
+          await Database.updateAllTenantStatuses();
+          console.log('✅ Tenant statuses updated');
+        } catch (statusError) {
+          console.warn('⚠️ Status update failed (non-critical):', statusError);
+        }
+
+        // Check pending reminders (non-blocking)
+        try {
+          await NotificationService.checkPendingReminders();
+          console.log('✅ Reminders checked');
+        } catch (reminderError) {
+          console.warn('⚠️ Reminder check failed (non-critical):', reminderError);
+        }
 
         setIsInitialized(true);
+        console.log('🎉 App initialization complete');
       } catch (err) {
-        console.error('Failed to initialize app:', err);
-        setError(err instanceof Error ? err.message : 'Unknown error occurred');
+        console.error('❌ CRITICAL: App initialization failed:', err);
+        const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+        setError(errorMessage);
+        
+        // Retry logic
+        const currentAttempt = initAttempts + 1;
+        setInitAttempts(currentAttempt);
+        
+        if (currentAttempt < 3) {
+          console.log(`🔄 Retrying initialization (attempt ${currentAttempt + 1}/3)...`);
+          setTimeout(() => {
+            setError(null);
+            initApp();
+          }, 2000);
+        } else {
+          // Show user-friendly error after max attempts
+          Alert.alert(
+            'Initialization Failed',
+            'The app failed to start properly. Please restart the app or reinstall if the problem persists.\n\nError: ' + errorMessage,
+            [
+              {
+                text: 'Retry',
+                onPress: () => {
+                  setError(null);
+                  setInitAttempts(0);
+                  initApp();
+                }
+              }
+            ]
+          );
+        }
       }
     };
 
     initApp();
-  }, []);
+  }, []); // Only run once on mount
 
-   const runHeartbeat = useCallback(async (): Promise<{
+  const runHeartbeat = useCallback(async (): Promise<{
     statusUpdates: number;
     suspensionAlerts: string[];
     contractAlerts: string[];
@@ -85,7 +150,6 @@ export const useDatabase = () => {
     }
   }, []);
 
-  // Enhanced tenant methods with event emission
   const addTenant = useCallback(async (tenant: any) => {
     const result = await Database.addTenant(tenant);
     dbEvents.emit('tenant_added');
@@ -102,32 +166,22 @@ export const useDatabase = () => {
     dbEvents.emit('tenant_deleted');
   }, []);
 
-  // Enhanced payment method with event emission
   const recordPayment = useCallback(async (payment: any) => {
     const result = await Database.recordPayment(payment);
     dbEvents.emit('payment_recorded');
 
-    // Show alert for partial payments
     if (result.shouldAlertPartial && result.alertMessage) {
-      // You might want to use a different alert mechanism here
       console.log('🔔 Partial Payment Alert:', result.alertMessage);
     }
     
     return result.paymentId;
   }, []);
 
-   // ADD CANCEL PAYMENT METHOD HERE - RIGHT AFTER recordPayment
   const cancelPayment = useCallback(async (paymentId: number, reason: string) => {
     await Database.cancelPayment(paymentId, reason);
-    dbEvents.emit('payment_recorded'); // Emit same event as recordPayment to refresh views
+    dbEvents.emit('payment_recorded');
   }, []);
 
-  // NEW: Advanced analytics
-  const getAdvancedAnalytics = useCallback(async () => {
-    return await Database.getAdvancedAnalytics();
-  }, []);
-
-  // Enhanced settings method with event emission
   const updateSettings = useCallback(async (settings: any) => {
     await Database.updateSettings(settings);
     dbEvents.emit('settings_updated');
@@ -137,53 +191,66 @@ export const useDatabase = () => {
     isInitialized,
     error,
     heartbeatResults,
+    initAttempts,
 
     // Core methods
     getAllTenants: Database.getAllTenants,
     getTenant: Database.getTenant,
-    addTenant: Database.addTenant,
-    updateTenant: Database.updateTenant,
-    deleteTenant: Database.deleteTenant,
-
+    addTenant,
+    updateTenant,
+    deleteTenant,
       
     // Payment methods
     recordPayment,
     cancelPayment,
     getPaymentHistory: Database.getPaymentHistory,
-    getPaymentStats: Database.getPaymentStats,
-    getMonthlyTrend: Database.getMonthlyTrend,
-    getAdvancedAnalytics,
+    getPaymentStats: Database.getPaymentStats, // ✅ NOW EXPORTED
+    getMonthlyTrend: Database.getMonthlyTrend, // ✅ NOW EXPORTED
     getDashboardStats: Database.getDashboardStats,
-    getTenantStats: Database.getTenantStats,
+    getTenantStats: Database.getTenantStats, // ✅ NOW EXPORTED
     getTenantWithDetails: Database.getTenantWithDetails,
+    getRecentPayments: Database.getRecentPayments,
 
-      // System methods
+    // System methods
     runHeartbeat,
     updateAllTenantStatuses: Database.updateAllTenantStatuses,
-    resetCreditBalance: Database.resetCreditBalance,
+    resetCreditBalance: Database.resetCreditBalance, // ✅ NOW EXPORTED
     
     // Reminder methods
-    getUpcomingReminders: Database.getUpcomingReminders,
+    getUpcomingReminders: Database.getUpcomingReminders, // ✅ NOW EXPORTED
+    getReminders: Database.getReminders,
     
     // Settings methods
     getSettings: Database.getSettings,
     updateSettings,
+
+    // Search & Filter
+    searchTenants: Database.searchTenants,
+    getOverdueTenants: Database.getOverdueTenants,
+    getTenantsDueSoon: Database.getTenantsDueSoon,
+    getPaidTenants: Database.getPaidTenants,
+    
+    // Utility
+    getTotalMonthlyRent: Database.getTotalMonthlyRent,
+    getTotalCreditBalance: Database.getTotalCreditBalance,
   };
 };
 
-// Custom hook for auto-refreshing data
 export const useAutoRefresh = (
   loadDataFn: () => Promise<void>,
   events: DatabaseEventType[]
 ) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Auto-refresh when database events occur
   useEffect(() => {
     const unsubscribers = events.map(event => 
       dbEvents.subscribe(event, async () => {
         console.log(`🔄 Auto-refreshing due to: ${event}`);
-        await loadDataFn();
+        try {
+          await loadDataFn();
+        } catch (error) {
+          console.error('Auto-refresh failed:', error);
+        }
       })
     );
 
@@ -192,11 +259,12 @@ export const useAutoRefresh = (
     };
   }, [loadDataFn, events]);
 
-  // Manual refresh function for pull-to-refresh
   const refresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
       await loadDataFn();
+    } catch (error) {
+      console.error('Manual refresh failed:', error);
     } finally {
       setIsRefreshing(false);
     }
@@ -204,4 +272,3 @@ export const useAutoRefresh = (
 
   return { isRefreshing, refresh };
 };
-

@@ -1,10 +1,19 @@
-import { addDays, addMonths, format, parseISO } from 'date-fns';
+// database.ts - COMPLETE VERSION WITH ALL FUNCTIONS
+import { addDays, addMonths, endOfMonth, format, parseISO, startOfMonth, subMonths } from 'date-fns';
 import * as SQLite from 'expo-sqlite';
 import { Payment, Reminder, Settings, Tenant } from '../libs/types';
 
-// --- Singleton Pattern for Database Initialization ---
+// --- CRITICAL FIX: Lazy database initialization ---
+let db: SQLite.SQLiteDatabase | null = null;
 let initializationPromise: Promise<void> | null = null;
-const db = SQLite.openDatabaseSync('RentReminderDB');
+
+// Safe database getter that waits for initialization
+const getDb = (): SQLite.SQLiteDatabase => {
+  if (!db) {
+    throw new Error('Database not initialized. Call initializeDatabase() first.');
+  }
+  return db;
+};
 
 // --- Custom Error Classes for Better UI Feedback ---
 class RoomAlreadyExistsError extends Error {
@@ -42,8 +51,6 @@ const calculateNextDueDate = (baseDate: Date, rentCycle: 'monthly' | 'biweekly' 
 /**
  * Calculate tenant status based on next due date and payment history
  */
-
- 
 const calculateTenantStatus = (nextDueDate: string, hasPayments: boolean, currentDate: Date = new Date()): 'Paid' | 'Due Soon' | 'Overdue' => {
   try {
     const today = new Date(currentDate);
@@ -77,17 +84,17 @@ const calculateTenantStatus = (nextDueDate: string, hasPayments: boolean, curren
 /**
  * Get tenant's current next due date - FIXED VERSION
  */
-const getTenantNextDueDate = async (tenantId: number, db: SQLite.SQLiteDatabase): Promise<string> => {
+const getTenantNextDueDate = async (tenantId: number, database: SQLite.SQLiteDatabase): Promise<string> => {
   try {
     // Get tenant details
-    const tenant = await db.getFirstAsync<Tenant>(
+    const tenant = await database.getFirstAsync<Tenant>(
       'SELECT start_date, rent_cycle FROM tenants WHERE tenant_id = ?', 
       [tenantId]
     );
     if (!tenant) throw new Error('Tenant not found for due date calculation');
 
     // Try to get from last payment
-    const lastPayment = await db.getFirstAsync<{ next_due_date: string }>(
+    const lastPayment = await database.getFirstAsync<{ next_due_date: string }>(
       'SELECT next_due_date FROM payments WHERE tenant_id = ? ORDER BY next_due_date DESC, payment_id DESC LIMIT 1',
       [tenantId]
     );
@@ -103,7 +110,7 @@ const getTenantNextDueDate = async (tenantId: number, db: SQLite.SQLiteDatabase)
   } catch (error) {
     console.error('Error getting next due date for tenant:', tenantId, error);
     // Fallback calculation
-    const tenant = await db.getFirstAsync<Tenant>('SELECT start_date FROM tenants WHERE tenant_id = ?', [tenantId]);
+    const tenant = await database.getFirstAsync<Tenant>('SELECT start_date FROM tenants WHERE tenant_id = ?', [tenantId]);
     if (tenant) {
       const fallbackDate = addMonths(parseISO(tenant.start_date), 1);
       return format(fallbackDate, 'yyyy-MM-dd');
@@ -115,10 +122,10 @@ const getTenantNextDueDate = async (tenantId: number, db: SQLite.SQLiteDatabase)
 // --- Database Initialization and Migrations ---
 
 // Migration function to safely add new columns to existing tables
-const runMigrations = async (): Promise<void> => {
+const runMigrations = async (database: SQLite.SQLiteDatabase): Promise<void> => {
   try {
     // CHECK TENANTS TABLE
-    const tenantTableInfo = await db.getAllAsync<{ name: string }>(
+    const tenantTableInfo = await database.getAllAsync<{ name: string }>(
       "PRAGMA table_info(tenants)"
     );
     
@@ -128,24 +135,24 @@ const runMigrations = async (): Promise<void> => {
     
     if (!hasCreditBalance) {
       console.log('🔄 Running migration: Adding credit_balance column...');
-      await db.execAsync('ALTER TABLE tenants ADD COLUMN credit_balance REAL DEFAULT 0;');
+      await database.execAsync('ALTER TABLE tenants ADD COLUMN credit_balance REAL DEFAULT 0;');
       console.log('✅ Migration completed: credit_balance column added.');
     }
     
     if (!hasContractEndDate) {
       console.log('🔄 Running migration: Adding contract_end_date column...');
-      await db.execAsync('ALTER TABLE tenants ADD COLUMN contract_end_date TEXT DEFAULT NULL;');
+      await database.execAsync('ALTER TABLE tenants ADD COLUMN contract_end_date TEXT DEFAULT NULL;');
       console.log('✅ Migration completed: contract_end_date column added.');
     }
     
     if (!hasRentCycle) {
       console.log('🔄 Running migration: Adding rent_cycle column...');
-      await db.execAsync('ALTER TABLE tenants ADD COLUMN rent_cycle TEXT DEFAULT "monthly";');
+      await database.execAsync('ALTER TABLE tenants ADD COLUMN rent_cycle TEXT DEFAULT "monthly";');
       console.log('✅ Migration completed: rent_cycle column added.');
     }
 
     // CHECK PAYMENTS TABLE (NEW)
-    const paymentTableInfo = await db.getAllAsync<{ name: string }>(
+    const paymentTableInfo = await database.getAllAsync<{ name: string }>(
       "PRAGMA table_info(payments)"
     );
     
@@ -154,13 +161,13 @@ const runMigrations = async (): Promise<void> => {
     
     if (!hasRentAmountAtPayment) {
       console.log('🔄 Running migration: Adding rent_amount_at_payment column...');
-      await db.execAsync('ALTER TABLE payments ADD COLUMN rent_amount_at_payment REAL;');
+      await database.execAsync('ALTER TABLE payments ADD COLUMN rent_amount_at_payment REAL;');
       console.log('✅ Migration completed: rent_amount_at_payment column added.');
     }
     
     if (!hasRentCycleAtPayment) {
       console.log('🔄 Running migration: Adding rent_cycle_at_payment column...');
-      await db.execAsync('ALTER TABLE payments ADD COLUMN rent_cycle_at_payment TEXT;');
+      await database.execAsync('ALTER TABLE payments ADD COLUMN rent_cycle_at_payment TEXT;');
       console.log('✅ Migration completed: rent_cycle_at_payment column added.');
     }
 
@@ -170,13 +177,23 @@ const runMigrations = async (): Promise<void> => {
   }
 };
 
+// --- CRITICAL FIX: Safe Initialization ---
 export const initializeDatabase = async (): Promise<void> => {
+  // Return existing promise if initialization is in progress
   if (initializationPromise) {
     return initializationPromise;
   }
 
   initializationPromise = (async () => {
     try {
+      console.log('🔄 Initializing database...');
+      
+      // CRITICAL: Open database INSIDE the async function
+      if (!db) {
+        db = SQLite.openDatabaseSync('RentReminderDB');
+        console.log('✅ Database connection opened');
+      }
+
       await db.execAsync('BEGIN TRANSACTION;');
       await db.execAsync('PRAGMA foreign_keys = ON;');
 
@@ -260,7 +277,7 @@ export const initializeDatabase = async (): Promise<void> => {
       `);
       
       // Run migrations AFTER tables are created
-      await runMigrations();
+      await runMigrations(db);
 
       // Update existing tenants to set default contract_end_date if NULL
       const tenantsWithNullContract = await db.getAllAsync<{ tenant_id: number; start_date: string }>(
@@ -307,9 +324,12 @@ export const initializeDatabase = async (): Promise<void> => {
       await db.execAsync('COMMIT;');
       console.log('✅ Database initialized successfully');
     } catch (error) {
-      await db.execAsync('ROLLBACK;');
+      if (db) {
+        await db.execAsync('ROLLBACK;');
+      }
       console.error('❌ Database initialization error:', error);
       initializationPromise = null;
+      db = null; // Reset database connection
       throw error;
     }
   })();
@@ -319,11 +339,12 @@ export const initializeDatabase = async (): Promise<void> => {
 
 // --- Database Public API ---
 export const Database = {
-  getDb: () => db,
+  getDb: getDb,
 
   getAllTenants: async (): Promise<Tenant[]> => {
     try {
-      return await db.getAllAsync<Tenant>('SELECT * FROM tenants ORDER BY name COLLATE NOCASE');
+      const database = getDb();
+      return await database.getAllAsync<Tenant>('SELECT * FROM tenants ORDER BY name COLLATE NOCASE');
     } catch (error) {
       console.error('❌ Error getting all tenants:', error);
       throw new DatabaseError("Could not fetch tenant list.");
@@ -332,7 +353,8 @@ export const Database = {
 
   getTenant: async (tenantId: number): Promise<Tenant | null> => {
     try {
-      return await db.getFirstAsync<Tenant>('SELECT * FROM tenants WHERE tenant_id = ?', [tenantId]);
+      const database = getDb();
+      return await database.getFirstAsync<Tenant>('SELECT * FROM tenants WHERE tenant_id = ?', [tenantId]);
     } catch (error) {
       console.error(`❌ Error getting tenant ${tenantId}:`, error);
       throw new DatabaseError("Could not fetch tenant details.");
@@ -341,13 +363,14 @@ export const Database = {
   
   checkRoomExists: async (roomNumber: string, excludeTenantId?: number): Promise<boolean> => {
     try {
+      const database = getDb();
       let query = 'SELECT 1 FROM tenants WHERE room_number = ? LIMIT 1';
       const params: (string | number)[] = [roomNumber];
       if (excludeTenantId) {
         query = 'SELECT 1 FROM tenants WHERE room_number = ? AND tenant_id != ? LIMIT 1';
         params.push(excludeTenantId);
       }
-      const result = await db.getFirstAsync<any>(query, params);
+      const result = await database.getFirstAsync<any>(query, params);
       return !!result;
     } catch (error) {
       console.error('❌ Error in checkRoomExists:', error);
@@ -355,61 +378,56 @@ export const Database = {
     }
   },
 
-  // Add this method to your Database object in database.ts
-fixPaymentCalculations: async (): Promise<void> => {
-  try {
-    console.log('🔄 Fixing payment calculations...');
-    await db.execAsync('BEGIN TRANSACTION');
-    
-    // Get all tenants
-    const tenants = await db.getAllAsync<Tenant>('SELECT * FROM tenants');
-    
-    for (const tenant of tenants) {
-      // Get all payments for this tenant in chronological order
-      const payments = await db.getAllAsync<Payment>(
-        'SELECT * FROM payments WHERE tenant_id = ? ORDER BY payment_date ASC, payment_id ASC',
-        [tenant.tenant_id]
-      );
+  fixPaymentCalculations: async (): Promise<void> => {
+    try {
+      const database = getDb();
+      console.log('🔄 Fixing payment calculations...');
+      await database.execAsync('BEGIN TRANSACTION');
       
-      let runningCredit = 0;
-      let currentDueDate = parseISO(tenant.start_date);
+      const tenants = await database.getAllAsync<Tenant>('SELECT * FROM tenants');
       
-      for (const payment of payments) {
-        // Recalculate the payment
-        const totalAvailable = payment.amount_paid + runningCredit;
-        const fullCycles = Math.floor(totalAvailable / tenant.monthly_rent);
-        runningCredit = totalAvailable % tenant.monthly_rent;
+      for (const tenant of tenants) {
+        const payments = await database.getAllAsync<Payment>(
+          'SELECT * FROM payments WHERE tenant_id = ? ORDER BY payment_date ASC, payment_id ASC',
+          [tenant.tenant_id]
+        );
         
-        // Calculate new due date
-        for (let i = 0; i < fullCycles; i++) {
-          currentDueDate = calculateNextDueDate(currentDueDate, tenant.rent_cycle || 'monthly');
+        let runningCredit = 0;
+        let currentDueDate = parseISO(tenant.start_date);
+        
+        for (const payment of payments) {
+          const totalAvailable = payment.amount_paid + runningCredit;
+          const fullCycles = Math.floor(totalAvailable / tenant.monthly_rent);
+          runningCredit = totalAvailable % tenant.monthly_rent;
+          
+          for (let i = 0; i < fullCycles; i++) {
+            currentDueDate = calculateNextDueDate(currentDueDate, tenant.rent_cycle || 'monthly');
+          }
+          
+          const newDueDate = format(currentDueDate, 'yyyy-MM-dd');
+          
+          await database.runAsync(
+            'UPDATE payments SET months_paid_for = ?, next_due_date = ? WHERE payment_id = ?',
+            [fullCycles, newDueDate, payment.payment_id]
+          );
         }
         
-        const newDueDate = format(currentDueDate, 'yyyy-MM-dd');
-        
-        // Update payment record
-        await db.runAsync(
-          'UPDATE payments SET months_paid_for = ?, next_due_date = ? WHERE payment_id = ?',
-          [fullCycles, newDueDate, payment.payment_id]
+        const finalStatus = calculateTenantStatus(format(currentDueDate, 'yyyy-MM-dd'), payments.length > 0);
+        await database.runAsync(
+          'UPDATE tenants SET credit_balance = ?, status = ? WHERE tenant_id = ?',
+          [runningCredit, finalStatus, tenant.tenant_id]
         );
       }
       
-      // Update tenant status and credit
-      const finalStatus = calculateTenantStatus(format(currentDueDate, 'yyyy-MM-dd'), payments.length > 0);
-      await db.runAsync(
-        'UPDATE tenants SET credit_balance = ?, status = ? WHERE tenant_id = ?',
-        [runningCredit, finalStatus, tenant.tenant_id]
-      );
+      await database.execAsync('COMMIT');
+      console.log('✅ Payment calculations fixed successfully');
+    } catch (error) {
+      const database = getDb();
+      await database.execAsync('ROLLBACK');
+      console.error('❌ Error fixing payment calculations:', error);
+      throw error;
     }
-    
-    await db.execAsync('COMMIT');
-    console.log('✅ Payment calculations fixed successfully');
-  } catch (error) {
-    await db.execAsync('ROLLBACK');
-    console.error('❌ Error fixing payment calculations:', error);
-    throw error;
-  }
-},
+  },
 
   addTenant: async (tenant: {
     name: string;
@@ -421,24 +439,23 @@ fixPaymentCalculations: async (): Promise<void> => {
     rentCycle: 'monthly' | 'biweekly' | 'quarterly';
     notes?: string;
   }): Promise<number> => {
+    const database = getDb();
     const roomExists = await Database.checkRoomExists(tenant.roomNumber);
     if (roomExists) {
       throw new RoomAlreadyExistsError(tenant.roomNumber);
     }
 
-    // Validate monthly rent
     if (tenant.monthlyRent <= 0) {
       throw new DatabaseError("Monthly rent must be greater than 0");
     }
 
     try {
-      // Calculate first due date and initial status
       const firstDueDate = calculateNextDueDate(parseISO(tenant.startDate), tenant.rentCycle);
       const firstDueDateStr = format(firstDueDate, 'yyyy-MM-dd');
       
       const initialStatus = calculateTenantStatus(firstDueDateStr, false);
 
-      const result = await db.runAsync(
+      const result = await database.runAsync(
         `INSERT INTO tenants (name, phone, room_number, start_date, contract_end_date, monthly_rent, rent_cycle, notes, status) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
@@ -483,13 +500,14 @@ fixPaymentCalculations: async (): Promise<void> => {
     contractEndDate?: string;
     notes?: string;
   }): Promise<void> => {
+    const database = getDb();
     const roomExists = await Database.checkRoomExists(updates.roomNumber, tenantId);
     if (roomExists) {
       throw new RoomAlreadyExistsError(updates.roomNumber);
     }
     
     try {
-      await db.runAsync(
+      await database.runAsync(
         `UPDATE tenants 
          SET name = ?, phone = ?, room_number = ?, start_date = ?, monthly_rent = ?, rent_cycle = ?, contract_end_date = ?, notes = ?, updated_at = datetime('now')
          WHERE tenant_id = ?`,
@@ -513,9 +531,10 @@ fixPaymentCalculations: async (): Promise<void> => {
 
   deleteTenant: async (tenantId: number): Promise<void> => {
     try {
+      const database = getDb();
       const { NotificationService } = await import('../services/notifications');
       await NotificationService.cancelReminders(tenantId);
-      await db.runAsync('DELETE FROM tenants WHERE tenant_id = ?', [tenantId]);
+      await database.runAsync('DELETE FROM tenants WHERE tenant_id = ?', [tenantId]);
     } catch (error) {
       console.error(`❌ Error deleting tenant ${tenantId}:`, error);
       throw new DatabaseError("Failed to delete the tenant.");
@@ -525,13 +544,14 @@ fixPaymentCalculations: async (): Promise<void> => {
   updateAllTenantStatuses: async (): Promise<void> => {
     console.log('🔄 Updating all tenant statuses...');
     try {
-      await db.execAsync('BEGIN TRANSACTION');
-      const tenants = await db.getAllAsync<Tenant>('SELECT * FROM tenants');
+      const database = getDb();
+      await database.execAsync('BEGIN TRANSACTION');
+      const tenants = await database.getAllAsync<Tenant>('SELECT * FROM tenants');
       
       for (const tenant of tenants) {
         try {
-          const nextDueDate = await getTenantNextDueDate(tenant.tenant_id, db);
-          const hasPayments = await db.getFirstAsync<{ count: number }>(
+          const nextDueDate = await getTenantNextDueDate(tenant.tenant_id, database);
+          const hasPayments = await database.getFirstAsync<{ count: number }>(
             'SELECT COUNT(*) as count FROM payments WHERE tenant_id = ?',
             [tenant.tenant_id]
           );
@@ -539,7 +559,7 @@ fixPaymentCalculations: async (): Promise<void> => {
           const newStatus = calculateTenantStatus(nextDueDate, (hasPayments?.count || 0) > 0);
 
           if (newStatus !== tenant.status) {
-            await db.runAsync(
+            await database.runAsync(
               'UPDATE tenants SET status = ?, updated_at = datetime("now") WHERE tenant_id = ?',
               [newStatus, tenant.tenant_id]
             );
@@ -550,180 +570,169 @@ fixPaymentCalculations: async (): Promise<void> => {
         }
       }
       
-      await db.execAsync('COMMIT');
+      await database.execAsync('COMMIT');
       console.log('✅ Tenant status update completed successfully');
     } catch (error) {
-      await db.execAsync('ROLLBACK');
+      const database = getDb();
+      await database.execAsync('ROLLBACK');
       console.error('❌ Fatal error during tenant status update:', error);
       throw new DatabaseError("Failed to update tenant statuses.");
     }
   },
 
   recordPayment: async (payment: {
-  tenantId: number;
-  amountPaid: number;
-  paymentDate: string;
-  paymentMethod: string;
-  notes?: string;
-}): Promise<{ 
-  paymentId: number; 
-  shouldAlertPartial: boolean; 
-  alertMessage?: string;
-  warnings?: string[];
-}> => {
-  try {
-    await db.execAsync('BEGIN TRANSACTION');
-    const warnings: string[] = [];
-
-    // 1. Get tenant with ALL relevant data
-    const tenant = await db.getFirstAsync<Tenant>(
-      'SELECT * FROM tenants WHERE tenant_id = ?',
-      [payment.tenantId]
-    );
-    if (!tenant) throw new Error('Tenant not found');
-
-    // 2. Get last payment by NEXT_DUE_DATE (FIXED: Use payment_date for chronological order)
-    const lastPayment = await db.getFirstAsync<{ 
-      next_due_date: string;
-      payment_date: string;
-    }>(
-      `SELECT next_due_date, payment_date 
-       FROM payments 
-       WHERE tenant_id = ? 
-       ORDER BY payment_date DESC, payment_id DESC 
-       LIMIT 1`,
-      [payment.tenantId]
-    );
-
-    // 3. Determine baseDate for calculation (FIXED: Use correct base date logic)
-    let baseDate: Date;
-    if (lastPayment) {
-      // Use the next_due_date from the last payment as our starting point
-      baseDate = parseISO(lastPayment.next_due_date);
-      
-      // Validate payment date sequence
-      if (payment.paymentDate < lastPayment.payment_date) {
-        warnings.push(
-          `⚠️ This payment is dated ${payment.paymentDate} but the last payment was ${lastPayment.payment_date}. ` +
-          `Next due date will calculate from ${lastPayment.next_due_date}.`
-        );
-      }
-    } else {
-      // No previous payments - start from tenant's move-in date
-      baseDate = parseISO(tenant.start_date);
-    }
-
-    // 4. PERFORM CALCULATION with current rent amount (FIXED: Correct credit calculation)
-    const currentRent = tenant.monthly_rent;
-    const totalAvailable = payment.amountPaid + (tenant.credit_balance || 0);
-    
-    // Calculate how many full payment cycles this covers
-    const fullCyclesCovered = Math.floor(totalAvailable / currentRent);
-    const newCreditBalance = totalAvailable % currentRent;
-
-    // 5. Calculate next_due_date (FIXED: Proper date progression)
-    let nextDueDate = new Date(baseDate);
-    
-    // Move forward by the number of full cycles covered
-    for (let i = 0; i < fullCyclesCovered; i++) {
-      nextDueDate = calculateNextDueDate(nextDueDate, tenant.rent_cycle || 'monthly');
-    }
-    
-    const nextDueDateStr = format(nextDueDate, 'yyyy-MM-dd');
-
-    // 6. Record payment WITH rent amount snapshot
-    const result = await db.runAsync(
-      `INSERT INTO payments (
-        tenant_id, 
-        amount_paid, 
-        months_paid_for, 
-        payment_date, 
-        next_due_date, 
-        payment_method, 
-        notes,
-        rent_amount_at_payment,
-        rent_cycle_at_payment
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        payment.tenantId,
-        payment.amountPaid,
-        fullCyclesCovered,
-        payment.paymentDate,
-        nextDueDateStr,
-        payment.paymentMethod,
-        payment.notes || '',
-        currentRent,
-        tenant.rent_cycle || 'monthly'
-      ]
-    );
-
-    // 7. Update tenant status (FIXED: Always recalculate status based on new due date)
-    const hasPayments = true; // We just recorded a payment
-    const newStatus = calculateTenantStatus(nextDueDateStr, hasPayments);
-    
-    await db.runAsync(
-      `UPDATE tenants 
-       SET credit_balance = ?, 
-           status = ?, 
-           updated_at = datetime('now') 
-       WHERE tenant_id = ?`,
-      [newCreditBalance, newStatus, payment.tenantId]
-    );
-
-    // 8. Update reminders
+    tenantId: number;
+    amountPaid: number;
+    paymentDate: string;
+    paymentMethod: string;
+    notes?: string;
+  }): Promise<{ 
+    paymentId: number; 
+    shouldAlertPartial: boolean; 
+    alertMessage?: string;
+    warnings?: string[];
+  }> => {
     try {
-      const { NotificationService } = await import('../services/notifications');
-      await NotificationService.cancelReminders(payment.tenantId);
-      await NotificationService.createReminder(payment.tenantId, nextDueDateStr);
-    } catch (notifError) {
-      console.warn('⚠️ Failed to update reminders:', notifError);
-      warnings.push('Reminder notification update failed');
-    }
-    
-    await db.execAsync('COMMIT');
+      const database = getDb();
+      await database.execAsync('BEGIN TRANSACTION');
+      const warnings: string[] = [];
 
-    // 9. Determine alert needs
-    let shouldAlertPartial = false;
-    let alertMessage = '';
-    
-    if (newCreditBalance > 0 && newCreditBalance < currentRent) {
-      shouldAlertPartial = true;
-      alertMessage = 
-        `Partial payment recorded. Credit balance: ${newCreditBalance.toLocaleString()} UGX. ` +
-        `Full payment: ${currentRent.toLocaleString()} UGX.`;
+      const tenant = await database.getFirstAsync<Tenant>(
+        'SELECT * FROM tenants WHERE tenant_id = ?',
+        [payment.tenantId]
+      );
+      if (!tenant) throw new Error('Tenant not found');
+
+      const lastPayment = await database.getFirstAsync<{ 
+        next_due_date: string;
+        payment_date: string;
+      }>(
+        `SELECT next_due_date, payment_date 
+         FROM payments 
+         WHERE tenant_id = ? 
+         ORDER BY payment_date DESC, payment_id DESC 
+         LIMIT 1`,
+        [payment.tenantId]
+      );
+
+      let baseDate: Date;
+      if (lastPayment) {
+        baseDate = parseISO(lastPayment.next_due_date);
+        
+        if (payment.paymentDate < lastPayment.payment_date) {
+          warnings.push(
+            `⚠️ This payment is dated ${payment.paymentDate} but the last payment was ${lastPayment.payment_date}. ` +
+            `Next due date will calculate from ${lastPayment.next_due_date}.`
+          );
+        }
+      } else {
+        baseDate = parseISO(tenant.start_date);
+      }
+
+      const currentRent = tenant.monthly_rent;
+      const totalAvailable = payment.amountPaid + (tenant.credit_balance || 0);
+      
+      const fullCyclesCovered = Math.floor(totalAvailable / currentRent);
+      const newCreditBalance = totalAvailable % currentRent;
+
+      let nextDueDate = new Date(baseDate);
+      
+      for (let i = 0; i < fullCyclesCovered; i++) {
+        nextDueDate = calculateNextDueDate(nextDueDate, tenant.rent_cycle || 'monthly');
+      }
+      
+      const nextDueDateStr = format(nextDueDate, 'yyyy-MM-dd');
+
+      const result = await database.runAsync(
+        `INSERT INTO payments (
+          tenant_id, 
+          amount_paid, 
+          months_paid_for, 
+          payment_date, 
+          next_due_date, 
+          payment_method, 
+          notes,
+          rent_amount_at_payment,
+          rent_cycle_at_payment
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          payment.tenantId,
+          payment.amountPaid,
+          fullCyclesCovered,
+          payment.paymentDate,
+          nextDueDateStr,
+          payment.paymentMethod,
+          payment.notes || '',
+          currentRent,
+          tenant.rent_cycle || 'monthly'
+        ]
+      );
+
+      const hasPayments = true;
+      const newStatus = calculateTenantStatus(nextDueDateStr, hasPayments);
+      
+      await database.runAsync(
+        `UPDATE tenants 
+         SET credit_balance = ?, 
+             status = ?, 
+             updated_at = datetime('now') 
+         WHERE tenant_id = ?`,
+        [newCreditBalance, newStatus, payment.tenantId]
+      );
+
+      try {
+        const { NotificationService } = await import('../services/notifications');
+        await NotificationService.cancelReminders(payment.tenantId);
+        await NotificationService.createReminder(payment.tenantId, nextDueDateStr);
+      } catch (notifError) {
+        console.warn('⚠️ Failed to update reminders:', notifError);
+        warnings.push('Reminder notification update failed');
+      }
+      
+      await database.execAsync('COMMIT');
+
+      let shouldAlertPartial = false;
+      let alertMessage = '';
+      
+      if (newCreditBalance > 0 && newCreditBalance < currentRent) {
+        shouldAlertPartial = true;
+        alertMessage = 
+          `Partial payment recorded. Credit balance: ${newCreditBalance.toLocaleString()} UGX. ` +
+          `Full payment: ${currentRent.toLocaleString()} UGX.`;
+      }
+      
+      if (fullCyclesCovered === 0 && payment.amountPaid > 0) {
+        shouldAlertPartial = true;
+        alertMessage = 
+          `Payment of ${payment.amountPaid.toLocaleString()} UGX recorded. ` +
+          `Credit balance: ${newCreditBalance.toLocaleString()} UGX. ` +
+          `Does not cover a full period (${currentRent.toLocaleString()} UGX needed).`;
+      }
+      
+      return {
+        paymentId: result.lastInsertRowId,
+        shouldAlertPartial,
+        alertMessage,
+        warnings: warnings.length > 0 ? warnings : undefined
+      };
+      
+    } catch (error) {
+      const database = getDb();
+      await database.execAsync('ROLLBACK');
+      console.error('❌ Error recording payment:', error);
+      throw new DatabaseError(
+        "The payment could not be recorded. No changes were made. " +
+        (error instanceof Error ? error.message : '')
+      );
     }
-    
-    if (fullCyclesCovered === 0 && payment.amountPaid > 0) {
-      shouldAlertPartial = true;
-      alertMessage = 
-        `Payment of ${payment.amountPaid.toLocaleString()} UGX recorded. ` +
-        `Credit balance: ${newCreditBalance.toLocaleString()} UGX. ` +
-        `Does not cover a full period (${currentRent.toLocaleString()} UGX needed).`;
-    }
-    
-    return {
-      paymentId: result.lastInsertRowId,
-      shouldAlertPartial,
-      alertMessage,
-      warnings: warnings.length > 0 ? warnings : undefined
-    };
-    
-  } catch (error) {
-    await db.execAsync('ROLLBACK');
-    console.error('❌ Error recording payment:', error);
-    throw new DatabaseError(
-      "The payment could not be recorded. No changes were made. " +
-      (error instanceof Error ? error.message : '')
-    );
-  }
-},
+  },
 
   cancelPayment: async (paymentId: number, reason: string): Promise<void> => {
     try {
-      await db.execAsync('BEGIN TRANSACTION');
+      const database = getDb();
+      await database.execAsync('BEGIN TRANSACTION');
       
-      // Get payment details
-      const payment = await db.getFirstAsync<Payment & { tenant_name: string }>(
+      const payment = await database.getFirstAsync<Payment & { tenant_name: string }>(
         `SELECT p.*, t.name as tenant_name 
          FROM payments p 
          JOIN tenants t ON p.tenant_id = t.tenant_id 
@@ -733,15 +742,13 @@ fixPaymentCalculations: async (): Promise<void> => {
       
       if (!payment) throw new Error('Payment not found');
       
-      // Get tenant
-      const tenant = await db.getFirstAsync<Tenant>(
+      const tenant = await database.getFirstAsync<Tenant>(
         'SELECT * FROM tenants WHERE tenant_id = ?',
         [payment.tenant_id]
       );
       if (!tenant) throw new Error('Tenant not found');
       
-      // Check if this is the most recent payment
-      const isLastPayment = await db.getFirstAsync<{ is_last: number }>(
+      const isLastPayment = await database.getFirstAsync<{ is_last: number }>(
         `SELECT (payment_id = ?) as is_last 
          FROM payments 
          WHERE tenant_id = ? 
@@ -757,11 +764,9 @@ fixPaymentCalculations: async (): Promise<void> => {
         );
       }
       
-      // Reverse the credit balance
       const reversedCredit = tenant.credit_balance - payment.amount_paid;
       
-      // Get the previous payment's next_due_date to restore
-      const previousPayment = await db.getFirstAsync<{ next_due_date: string }>(
+      const previousPayment = await database.getFirstAsync<{ next_due_date: string }>(
         `SELECT next_due_date 
          FROM payments 
          WHERE tenant_id = ? AND payment_id < ? 
@@ -770,10 +775,8 @@ fixPaymentCalculations: async (): Promise<void> => {
         [payment.tenant_id, paymentId]
       );
       
-      // Delete the payment
-      await db.runAsync('DELETE FROM payments WHERE payment_id = ?', [paymentId]);
+      await database.runAsync('DELETE FROM payments WHERE payment_id = ?', [paymentId]);
       
-      // Update tenant status
       const newNextDueDate = previousPayment 
         ? previousPayment.next_due_date 
         : format(
@@ -781,7 +784,7 @@ fixPaymentCalculations: async (): Promise<void> => {
             'yyyy-MM-dd'
           );
       
-      const hasOtherPayments = await db.getFirstAsync<{ count: number }>(
+      const hasOtherPayments = await database.getFirstAsync<{ count: number }>(
         'SELECT COUNT(*) as count FROM payments WHERE tenant_id = ?',
         [payment.tenant_id]
       );
@@ -791,26 +794,26 @@ fixPaymentCalculations: async (): Promise<void> => {
         (hasOtherPayments?.count || 0) > 0
       );
       
-      await db.runAsync(
+      await database.runAsync(
         `UPDATE tenants 
          SET credit_balance = ?, status = ?, updated_at = datetime('now') 
          WHERE tenant_id = ?`,
         [Math.max(reversedCredit, 0), newStatus, payment.tenant_id]
       );
       
-      // Log the cancellation
-      await db.runAsync(
+      await database.runAsync(
         `INSERT INTO payment_cancellations (
           original_payment_id, tenant_id, amount, reason, cancelled_at
         ) VALUES (?, ?, ?, ?, datetime('now'))`,
         [paymentId, payment.tenant_id, payment.amount_paid, reason]
       );
       
-      await db.execAsync('COMMIT');
+      await database.execAsync('COMMIT');
       console.log(`✅ Payment ${paymentId} cancelled: ${reason}`);
       
     } catch (error) {
-      await db.execAsync('ROLLBACK');
+      const database = getDb();
+      await database.execAsync('ROLLBACK');
       console.error('❌ Error cancelling payment:', error);
       throw new DatabaseError(
         "Failed to cancel payment. " + 
@@ -832,16 +835,16 @@ fixPaymentCalculations: async (): Promise<void> => {
     };
 
     try {
-      await db.execAsync('BEGIN TRANSACTION');
+      const database = getDb();
+      await database.execAsync('BEGIN TRANSACTION');
       const settings = await Database.getSettings();
-      const tenants = await db.getAllAsync<Tenant>('SELECT * FROM tenants');
+      const tenants = await database.getAllAsync<Tenant>('SELECT * FROM tenants');
       const today = new Date();
 
-      // Stage 1: Update Financial Statuses
       for (const tenant of tenants) {
         try {
-          const nextDueDate = await getTenantNextDueDate(tenant.tenant_id, db);
-          const hasPayments = await db.getFirstAsync<{ count: number }>(
+          const nextDueDate = await getTenantNextDueDate(tenant.tenant_id, database);
+          const hasPayments = await database.getFirstAsync<{ count: number }>(
             'SELECT COUNT(*) as count FROM payments WHERE tenant_id = ?',
             [tenant.tenant_id]
           );
@@ -849,7 +852,7 @@ fixPaymentCalculations: async (): Promise<void> => {
           const currentStatus = calculateTenantStatus(nextDueDate, (hasPayments?.count || 0) > 0, today);
 
           if (currentStatus !== tenant.status) {
-            await db.runAsync(
+            await database.runAsync(
               'UPDATE tenants SET status = ?, updated_at = datetime("now") WHERE tenant_id = ?',
               [currentStatus, tenant.tenant_id]
             );
@@ -861,17 +864,16 @@ fixPaymentCalculations: async (): Promise<void> => {
         }
       }
 
-      // Stage 2: Automated Administrative Decisions
       if (settings) {
         for (const tenant of tenants) {
           if (tenant.status === 'Overdue') {
             try {
-              const nextDueDate = await getTenantNextDueDate(tenant.tenant_id, db);
+              const nextDueDate = await getTenantNextDueDate(tenant.tenant_id, database);
               const dueDate = parseISO(nextDueDate);
               const daysOverdue = Math.ceil((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
               
               if (daysOverdue > (settings.auto_suspend_days || 30)) {
-                await db.runAsync(
+                await database.runAsync(
                   'UPDATE tenants SET status = ?, updated_at = datetime("now") WHERE tenant_id = ?',
                   ['Suspended', tenant.tenant_id]
                 );
@@ -886,7 +888,6 @@ fixPaymentCalculations: async (): Promise<void> => {
           }
         }
 
-        // Stage 3: Check for Upcoming Events
         const contractReminderDays = settings.contract_reminder_days || 60;
         const reminderThreshold = addDays(today, contractReminderDays);
         
@@ -909,11 +910,12 @@ fixPaymentCalculations: async (): Promise<void> => {
         }
       }
 
-      await db.execAsync('COMMIT');
+      await database.execAsync('COMMIT');
       console.log('✅ System heartbeat completed successfully');
       return results;
     } catch (error) {
-      await db.execAsync('ROLLBACK');
+      const database = getDb();
+      await database.execAsync('ROLLBACK');
       console.error('❌ Fatal error during system heartbeat:', error);
       throw new DatabaseError("Failed to run system audit.");
     }
@@ -921,8 +923,11 @@ fixPaymentCalculations: async (): Promise<void> => {
 
   getPaymentHistory: async (tenantId: number): Promise<Payment[]> => {
     try {
-      return await db.getAllAsync<Payment>(
-        'SELECT * FROM payments WHERE tenant_id = ? ORDER BY payment_date DESC, payment_id DESC', 
+      const database = getDb();
+      return await database.getAllAsync<Payment>(
+        `SELECT * FROM payments 
+         WHERE tenant_id = ? 
+         ORDER BY payment_date DESC, payment_id DESC`,
         [tenantId]
       );
     } catch (error) {
@@ -931,28 +936,11 @@ fixPaymentCalculations: async (): Promise<void> => {
     }
   },
 
-  getUpcomingReminders: async (daysAhead: number = 30): Promise<Reminder[]> => {
-    try {
-      const today = format(new Date(), 'yyyy-MM-dd');
-      const futureDate = format(addDays(new Date(), daysAhead), 'yyyy-MM-dd');
-
-      return await db.getAllAsync<Reminder>(
-        `SELECT r.*, t.name, t.room_number 
-         FROM reminders r JOIN tenants t ON r.tenant_id = t.tenant_id 
-         WHERE date(r.reminder_date) BETWEEN date(?) AND date(?) AND r.status = 'Pending'
-         ORDER BY r.reminder_date ASC`,
-        [today, futureDate]
-      );
-    } catch (error) {
-        console.error('❌ Error getting upcoming reminders:', error);
-        return [];
-    }
-  },
-
   getSettings: async (): Promise<Settings | null> => {
     try {
-      const settings = await db.getFirstAsync<Settings>('SELECT * FROM settings LIMIT 1');
-      if(settings) {
+      const database = getDb();
+      const settings = await database.getFirstAsync<Settings>('SELECT * FROM settings LIMIT 1');
+      if (settings) {
         return { 
           ...settings, 
           notification_enabled: Boolean(settings.notification_enabled),
@@ -969,207 +957,401 @@ fixPaymentCalculations: async (): Promise<void> => {
 
   updateSettings: async (settings: Partial<Settings>): Promise<void> => {
     try {
-      const current = await Database.getSettings();
-      if (!current) {
-        throw new DatabaseError("No settings found to update.");
+      const database = getDb();
+      const currentSettings = await Database.getSettings();
+      
+      if (currentSettings) {
+        await database.runAsync(
+          `UPDATE settings 
+           SET reminder_days_before_due = ?, reminder_time = ?, notification_enabled = ?, 
+               currency = ?, theme = ?, auto_suspend_days = ?, contract_reminder_days = ? 
+           WHERE setting_id = ?`,
+          [
+            settings.reminder_days_before_due ?? currentSettings.reminder_days_before_due,
+            settings.reminder_time ?? currentSettings.reminder_time,
+            settings.notification_enabled ? 1 : 0,
+            settings.currency ?? currentSettings.currency,
+            settings.theme ?? currentSettings.theme,
+            settings.auto_suspend_days ?? currentSettings.auto_suspend_days,
+            settings.contract_reminder_days ?? currentSettings.contract_reminder_days,
+            currentSettings.setting_id
+          ]
+        );
+      } else {
+        await database.runAsync(
+          `INSERT INTO settings (
+            reminder_days_before_due, reminder_time, notification_enabled, 
+            currency, theme, auto_suspend_days, contract_reminder_days
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            settings.reminder_days_before_due ?? 3,
+            settings.reminder_time ?? '09:00',
+            settings.notification_enabled ? 1 : 0,
+            settings.currency ?? 'UGX',
+            settings.theme ?? 'Light',
+            settings.auto_suspend_days ?? 30,
+            settings.contract_reminder_days ?? 60
+          ]
+        );
       }
-
-      await db.runAsync(
-        `UPDATE settings SET 
-            reminder_days_before_due = COALESCE(?, reminder_days_before_due),
-            reminder_time = COALESCE(?, reminder_time),
-            notification_enabled = COALESCE(?, notification_enabled),
-            currency = COALESCE(?, currency),
-            theme = COALESCE(?, theme),
-            auto_suspend_days = COALESCE(?, auto_suspend_days),
-            contract_reminder_days = COALESCE(?, contract_reminder_days)
-         WHERE setting_id = ?`,
-        [
-          settings.reminder_days_before_due,
-          settings.reminder_time,
-          settings.notification_enabled ? 1 : 0,
-          settings.currency,
-          settings.theme,
-          settings.auto_suspend_days,
-          settings.contract_reminder_days,
-          current.setting_id
-        ]
-      );
     } catch (error) {
       console.error('❌ Error updating settings:', error);
-      throw new DatabaseError("Failed to update settings.");
+      throw new DatabaseError("Failed to save settings.");
     }
   },
 
-  getPaymentStats: async (): Promise<{
-  totalCollected: number;
-  thisMonth: number;
-  lastMonth: number;
-  overdueAmount: number;
-}> => {
-  try {
-    const now = new Date();
-    const thisMonthStart = format(new Date(now.getFullYear(), now.getMonth(), 1), 'yyyy-MM-dd');
-    const lastMonthStart = format(new Date(now.getFullYear(), now.getMonth() - 1, 1), 'yyyy-MM-dd');
-    const lastMonthEnd = format(new Date(now.getFullYear(), now.getMonth(), 0), 'yyyy-MM-dd');
-
-    // FIXED: Join with tenants table to exclude deleted tenants
-    const total = await db.getFirstAsync<{ total: number }>(`
-      SELECT COALESCE(SUM(p.amount_paid), 0) as total 
-      FROM payments p 
-      INNER JOIN tenants t ON p.tenant_id = t.tenant_id
-    `);
-    
-    const thisMonth = await db.getFirstAsync<{ total: number }>(`
-      SELECT COALESCE(SUM(p.amount_paid), 0) as total 
-      FROM payments p 
-      INNER JOIN tenants t ON p.tenant_id = t.tenant_id 
-      WHERE p.payment_date >= ?
-    `, [thisMonthStart]);
-    
-    const lastMonth = await db.getFirstAsync<{ total: number }>(`
-      SELECT COALESCE(SUM(p.amount_paid), 0) as total 
-      FROM payments p 
-      INNER JOIN tenants t ON p.tenant_id = t.tenant_id 
-      WHERE p.payment_date BETWEEN ? AND ?
-    `, [lastMonthStart, lastMonthEnd]);
-    
-    // FIXED: Only count active tenants for overdue amount
-    const overdue = await db.getFirstAsync<{ total: number }>(`
-      SELECT COALESCE(SUM(t.monthly_rent), 0) as total 
-      FROM tenants t 
-      WHERE t.status = 'Overdue'
-    `);
-
-    return {
-      totalCollected: total?.total || 0,
-      thisMonth: thisMonth?.total || 0,
-      lastMonth: lastMonth?.total || 0,
-      overdueAmount: overdue?.total || 0,
-    };
-  } catch (error) {
-    console.error('❌ Error getting payment stats:', error);
-    return { totalCollected: 0, thisMonth: 0, lastMonth: 0, overdueAmount: 0 };
-  }
-},
-
-  getMonthlyTrend: async (): Promise<{ month: string; amount: number }[]> => {
+  getReminders: async (tenantId?: number): Promise<Reminder[]> => {
     try {
-        const months = [];
-        const now = new Date();
-        for (let i = 5; i >= 0; i--) {
-            const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-            const monthStart = format(date, 'yyyy-MM-dd');
-            const monthEnd = format(new Date(date.getFullYear(), date.getMonth() + 1, 0), 'yyyy-MM-dd');
-            const result = await db.getFirstAsync<{ total: number }>('SELECT COALESCE(SUM(amount_paid), 0) as total FROM payments WHERE payment_date BETWEEN ? AND ?', [monthStart, monthEnd]);
-            months.push({
-                month: format(date, 'MMM'),
-                amount: result?.total || 0,
-            });
-        }
-        return months;
+      const database = getDb();
+      if (tenantId) {
+        return await database.getAllAsync<Reminder>(
+          'SELECT * FROM reminders WHERE tenant_id = ? ORDER BY reminder_date DESC',
+          [tenantId]
+        );
+      } else {
+        return await database.getAllAsync<Reminder>(
+          'SELECT * FROM reminders ORDER BY reminder_date DESC'
+        );
+      }
     } catch (error) {
-        console.error('❌ Error getting monthly trend:', error);
-        return [];
+      console.error('❌ Error getting reminders:', error);
+      throw new DatabaseError("Could not fetch reminders.");
     }
   },
 
-  // NEW: Reset credit balance (for admin purposes)
-  resetCreditBalance: async (tenantId: number, newBalance: number = 0): Promise<void> => {
+  // NEW FUNCTION: Get upcoming reminders with tenant details
+  getUpcomingReminders: async (daysAhead: number = 30): Promise<Reminder[]> => {
     try {
-      await db.runAsync(
-        'UPDATE tenants SET credit_balance = ?, updated_at = datetime("now") WHERE tenant_id = ?',
-        [newBalance, tenantId]
+      const database = getDb();
+      const today = new Date();
+      const futureDate = addDays(today, daysAhead);
+      
+      return await database.getAllAsync<Reminder>(
+        `SELECT r.*, t.name, t.room_number 
+         FROM reminders r 
+         JOIN tenants t ON r.tenant_id = t.tenant_id 
+         WHERE date(r.reminder_date) <= date(?) 
+         AND r.status = 'Pending'
+         ORDER BY r.reminder_date ASC`,
+        [format(futureDate, 'yyyy-MM-dd')]
       );
-      console.log(`✅ Reset credit balance for tenant ${tenantId} to ${newBalance}`);
     } catch (error) {
-      console.error('❌ Error resetting credit balance:', error);
-      throw new DatabaseError("Failed to reset credit balance.");
+      console.error('❌ Error getting upcoming reminders:', error);
+      throw new DatabaseError("Could not fetch upcoming reminders.");
     }
   },
 
-  // NEW: Get tenant with their current credit balance and next due date
-  getTenantWithDetails: async (tenantId: number): Promise<(Tenant & { next_due_date: string }) | null> => {
-    try {
-      return await db.getFirstAsync<Tenant & { next_due_date: string }>(`
-        SELECT t.*, 
-               COALESCE(
-                 (SELECT next_due_date FROM payments WHERE tenant_id = t.tenant_id ORDER BY next_due_date DESC, payment_id DESC LIMIT 1),
-                 date(t.start_date, '+1 month')
-               ) as next_due_date
-        FROM tenants t
-        WHERE t.tenant_id = ?
-      `, [tenantId]);
-    } catch (error) {
-      console.error(`❌ Error getting tenant details ${tenantId}:`, error);
-      throw new DatabaseError("Could not fetch tenant details.");
-    }
-  },
-
-  getTenantStats: async (tenantId: number): Promise<{
-    totalPaid: number;
-    lastPaymentDate: string | null;
-    nextDueDate: string;
-    creditBalance: number;
-    paymentCount: number;
+  // NEW FUNCTION: Get payment statistics
+  getPaymentStats: async (): Promise<{
+    totalCollected: number;
+    thisMonth: number;
+    lastMonth: number;
+    overdueAmount: number;
   }> => {
     try {
-      const totalPaidResult = await db.getFirstAsync<{ total: number }>(
-        'SELECT COALESCE(SUM(amount_paid), 0) as total FROM payments WHERE tenant_id = ?',
-        [tenantId]
+      const database = getDb();
+      const today = new Date();
+      const thisMonthStart = startOfMonth(today);
+      const thisMonthEnd = endOfMonth(today);
+      const lastMonthStart = startOfMonth(subMonths(today, 1));
+      const lastMonthEnd = endOfMonth(subMonths(today, 1));
+
+      // Total collected
+      const totalResult = await database.getFirstAsync<{ total: number }>(
+        'SELECT COALESCE(SUM(amount_paid), 0) as total FROM payments'
       );
-      
-      const lastPayment = await db.getFirstAsync<{ payment_date: string }>(
-        'SELECT payment_date FROM payments WHERE tenant_id = ? ORDER BY payment_date DESC LIMIT 1',
-        [tenantId]
+
+      // This month
+      const thisMonthResult = await database.getFirstAsync<{ total: number }>(
+        `SELECT COALESCE(SUM(amount_paid), 0) as total 
+         FROM payments 
+         WHERE date(payment_date) >= date(?) AND date(payment_date) <= date(?)`,
+        [format(thisMonthStart, 'yyyy-MM-dd'), format(thisMonthEnd, 'yyyy-MM-dd')]
       );
-      
-      const paymentCountResult = await db.getFirstAsync<{ count: number }>(
-        'SELECT COUNT(*) as count FROM payments WHERE tenant_id = ?',
-        [tenantId]
+
+      // Last month
+      const lastMonthResult = await database.getFirstAsync<{ total: number }>(
+        `SELECT COALESCE(SUM(amount_paid), 0) as total 
+         FROM payments 
+         WHERE date(payment_date) >= date(?) AND date(payment_date) <= date(?)`,
+        [format(lastMonthStart, 'yyyy-MM-dd'), format(lastMonthEnd, 'yyyy-MM-dd')]
       );
-      
-      const tenant = await db.getFirstAsync<Tenant>('SELECT credit_balance FROM tenants WHERE tenant_id = ?', [tenantId]);
-      
-      const nextDueDate = await getTenantNextDueDate(tenantId, db);
+
+      // Overdue amount (sum of monthly rent for all overdue tenants)
+      const overdueResult = await database.getFirstAsync<{ total: number }>(
+        `SELECT COALESCE(SUM(monthly_rent), 0) as total 
+         FROM tenants 
+         WHERE status = 'Overdue'`
+      );
 
       return {
-        totalPaid: totalPaidResult?.total || 0,
-        lastPaymentDate: lastPayment?.payment_date || null,
-        nextDueDate,
-        creditBalance: tenant?.credit_balance || 0,
-        paymentCount: paymentCountResult?.count || 0
+        totalCollected: totalResult?.total || 0,
+        thisMonth: thisMonthResult?.total || 0,
+        lastMonth: lastMonthResult?.total || 0,
+        overdueAmount: overdueResult?.total || 0
       };
     } catch (error) {
-      console.error(`❌ Error getting stats for tenant ${tenantId}:`, error);
-      throw new DatabaseError("Could not fetch tenant statistics.");
+      console.error('❌ Error getting payment stats:', error);
+      throw new DatabaseError("Could not fetch payment statistics.");
+    }
+  },
+
+  // NEW FUNCTION: Get monthly payment trend
+  getMonthlyTrend: async (): Promise<{ month: string; amount: number }[]> => {
+    try {
+      const database = getDb();
+      const today = new Date();
+      const sixMonthsAgo = subMonths(today, 5);
+
+      const results = await database.getAllAsync<{ month: string; amount: number }>(
+        `SELECT 
+          strftime('%Y-%m', payment_date) as month,
+          COALESCE(SUM(amount_paid), 0) as amount
+         FROM payments
+         WHERE date(payment_date) >= date(?)
+         GROUP BY strftime('%Y-%m', payment_date)
+         ORDER BY month ASC`,
+        [format(sixMonthsAgo, 'yyyy-MM-dd')]
+      );
+
+      // Format month names
+      const formatted = results.map(row => ({
+        month: format(parseISO(row.month + '-01'), 'MMM'),
+        amount: row.amount
+      }));
+
+      // Fill in missing months with 0
+      const allMonths: { month: string; amount: number }[] = [];
+      for (let i = 5; i >= 0; i--) {
+        const monthDate = subMonths(today, i);
+        const monthKey = format(monthDate, 'MMM');
+        const existing = formatted.find(f => f.month === monthKey);
+        allMonths.push({
+          month: monthKey,
+          amount: existing?.amount || 0
+        });
+      }
+
+      return allMonths;
+    } catch (error) {
+      console.error('❌ Error getting monthly trend:', error);
+      throw new DatabaseError("Could not fetch monthly payment trend.");
+    }
+  },
+
+  getOverdueTenants: async (): Promise<Tenant[]> => {
+    try {
+      const database = getDb();
+      return await database.getAllAsync<Tenant>(
+        'SELECT * FROM tenants WHERE status = "Overdue" ORDER BY name COLLATE NOCASE'
+      );
+    } catch (error) {
+      console.error('❌ Error getting overdue tenants:', error);
+      throw new DatabaseError("Could not fetch overdue tenants.");
+    }
+  },
+
+  getTenantsDueSoon: async (): Promise<Tenant[]> => {
+    try {
+      const database = getDb();
+      return await database.getAllAsync<Tenant>(
+        'SELECT * FROM tenants WHERE status = "Due Soon" ORDER BY name COLLATE NOCASE'
+      );
+    } catch (error) {
+      console.error('❌ Error getting tenants due soon:', error);
+      throw new DatabaseError("Could not fetch tenants due soon.");
+    }
+  },
+
+  getPaidTenants: async (): Promise<Tenant[]> => {
+    try {
+      const database = getDb();
+      return await database.getAllAsync<Tenant>(
+        'SELECT * FROM tenants WHERE status = "Paid" ORDER BY name COLLATE NOCASE'
+      );
+    } catch (error) {
+      console.error('❌ Error getting paid tenants:', error);
+      throw new DatabaseError("Could not fetch paid tenants.");
+    }
+  },
+
+  getTotalMonthlyRent: async (): Promise<number> => {
+    try {
+      const database = getDb();
+      const result = await database.getFirstAsync<{ total: number }>(
+        'SELECT SUM(monthly_rent) as total FROM tenants'
+      );
+      return result?.total || 0;
+    } catch (error) {
+      console.error('❌ Error getting total monthly rent:', error);
+      throw new DatabaseError("Could not calculate total monthly rent.");
+    }
+  },
+
+  getTotalCreditBalance: async (): Promise<number> => {
+    try {
+      const database = getDb();
+      const result = await database.getFirstAsync<{ total: number }>(
+        'SELECT SUM(credit_balance) as total FROM tenants'
+      );
+      return result?.total || 0;
+    } catch (error) {
+      console.error('❌ Error getting total credit balance:', error);
+      throw new DatabaseError("Could not calculate total credit balance.");
     }
   },
 
   getDashboardStats: async (): Promise<{
     totalTenants: number;
-    overdueCount: number;
-    dueSoonCount: number;
-    paidCount: number;
+    overdueTenants: number;
+    dueSoonTenants: number;
+    paidTenants: number;
     totalMonthlyRent: number;
+    totalCreditBalance: number;
   }> => {
     try {
-      const totalTenantsResult = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM tenants');
-      const overdueResult = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM tenants WHERE status = "Overdue"');
-      const dueSoonResult = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM tenants WHERE status = "Due Soon"');
-      const paidResult = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM tenants WHERE status = "Paid"');
-      const totalRentResult = await db.getFirstAsync<{ total: number }>('SELECT COALESCE(SUM(monthly_rent), 0) as total FROM tenants');
+      const database = getDb();
+      
+      const [totalTenants, overdueTenants, dueSoonTenants, paidTenants, totalMonthlyRent, totalCreditBalance] = await Promise.all([
+        database.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM tenants'),
+        database.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM tenants WHERE status = "Overdue"'),
+        database.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM tenants WHERE status = "Due Soon"'),
+        database.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM tenants WHERE status = "Paid"'),
+        database.getFirstAsync<{ total: number }>('SELECT SUM(monthly_rent) as total FROM tenants'),
+        database.getFirstAsync<{ total: number }>('SELECT SUM(credit_balance) as total FROM tenants')
+      ]);
 
       return {
-        totalTenants: totalTenantsResult?.count || 0,
-        overdueCount: overdueResult?.count || 0,
-        dueSoonCount: dueSoonResult?.count || 0,
-        paidCount: paidResult?.count || 0,
-        totalMonthlyRent: totalRentResult?.total || 0
+        totalTenants: totalTenants?.count || 0,
+        overdueTenants: overdueTenants?.count || 0,
+        dueSoonTenants: dueSoonTenants?.count || 0,
+        paidTenants: paidTenants?.count || 0,
+        totalMonthlyRent: totalMonthlyRent?.total || 0,
+        totalCreditBalance: totalCreditBalance?.total || 0
       };
     } catch (error) {
       console.error('❌ Error getting dashboard stats:', error);
       throw new DatabaseError("Could not fetch dashboard statistics.");
+    }
+  },
+
+  getRecentPayments: async (limit: number = 10): Promise<Payment[]> => {
+    try {
+      const database = getDb();
+      return await database.getAllAsync<Payment>(
+        `SELECT p.*, t.name as tenant_name, t.room_number 
+         FROM payments p 
+         JOIN tenants t ON p.tenant_id = t.tenant_id 
+         ORDER BY p.payment_date DESC, p.payment_id DESC 
+         LIMIT ?`,
+        [limit]
+      );
+    } catch (error) {
+      console.error('❌ Error getting recent payments:', error);
+      throw new DatabaseError("Could not fetch recent payments.");
+    }
+  },
+
+  searchTenants: async (query: string): Promise<Tenant[]> => {
+    try {
+      const database = getDb();
+      const searchTerm = `%${query}%`;
+      return await database.getAllAsync<Tenant>(
+        `SELECT * FROM tenants 
+         WHERE name LIKE ? OR room_number LIKE ? OR phone LIKE ?
+         ORDER BY name COLLATE NOCASE`,
+        [searchTerm, searchTerm, searchTerm]
+      );
+    } catch (error) {
+      console.error('❌ Error searching tenants:', error);
+      throw new DatabaseError("Could not search tenants.");
+    }
+  },
+
+  getTenantWithDetails: async (tenantId: number): Promise<{
+    tenant: Tenant;
+    payments: Payment[];
+    reminders: Reminder[];
+  } | null> => {
+    try {
+      const database = getDb();
+      const tenant = await Database.getTenant(tenantId);
+      if (!tenant) return null;
+
+      const [payments, reminders] = await Promise.all([
+        Database.getPaymentHistory(tenantId),
+        Database.getReminders(tenantId)
+      ]);
+
+      return { tenant, payments, reminders };
+    } catch (error) {
+      console.error(`❌ Error getting tenant details for ${tenantId}:`, error);
+      throw new DatabaseError("Could not fetch tenant details.");
+    }
+  },
+
+  // NEW FUNCTION: Get tenant statistics
+  getTenantStats: async (tenantId: number): Promise<{
+    totalPaid: number;
+    paymentsCount: number;
+    averagePayment: number;
+    lastPaymentDate: string | null;
+    nextDueDate: string | null;
+  }> => {
+    try {
+      const database = getDb();
+      
+      const statsResult = await database.getFirstAsync<{
+        total: number;
+        count: number;
+        average: number;
+      }>(
+        `SELECT 
+          COALESCE(SUM(amount_paid), 0) as total,
+          COUNT(*) as count,
+          COALESCE(AVG(amount_paid), 0) as average
+         FROM payments 
+         WHERE tenant_id = ?`,
+        [tenantId]
+      );
+
+      const lastPayment = await database.getFirstAsync<{ 
+        payment_date: string;
+        next_due_date: string;
+      }>(
+        `SELECT payment_date, next_due_date 
+         FROM payments 
+         WHERE tenant_id = ? 
+         ORDER BY payment_date DESC, payment_id DESC 
+         LIMIT 1`,
+        [tenantId]
+      );
+
+      return {
+        totalPaid: statsResult?.total || 0,
+        paymentsCount: statsResult?.count || 0,
+        averagePayment: statsResult?.average || 0,
+        lastPaymentDate: lastPayment?.payment_date || null,
+        nextDueDate: lastPayment?.next_due_date || null
+      };
+    } catch (error) {
+      console.error(`❌ Error getting tenant stats for ${tenantId}:`, error);
+      throw new DatabaseError("Could not fetch tenant statistics.");
+    }
+  },
+
+  // NEW FUNCTION: Reset credit balance (utility function)
+  resetCreditBalance: async (tenantId: number): Promise<void> => {
+    try {
+      const database = getDb();
+      await database.runAsync(
+        'UPDATE tenants SET credit_balance = 0, updated_at = datetime("now") WHERE tenant_id = ?',
+        [tenantId]
+      );
+      console.log(`✅ Credit balance reset for tenant ${tenantId}`);
+    } catch (error) {
+      console.error(`❌ Error resetting credit balance for tenant ${tenantId}:`, error);
+      throw new DatabaseError("Could not reset credit balance.");
     }
   }
 };

@@ -1,4 +1,4 @@
-// app/add-tenant.tsx
+// app/add-tenant.tsx - UPDATED
 import { Ionicons } from "@expo/vector-icons";
 import { addMonths, format } from "date-fns";
 import { useRouter } from "expo-router";
@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import DateInput from "../components/DateInput"; // NEW IMPORT
 import { useDatabase } from "../hooks/use-db";
 
 const InputField = ({
@@ -50,19 +51,15 @@ export default function AddTenant() {
   const { isInitialized, addTenant } = useDatabase();
 
   const [formData, setFormData] = useState({
-  name: "",
-  phone: "",
-  roomNumber: "",
-  startDate: new Date().toISOString().split("T")[0],
-  contractEndDate: format(addMonths(new Date(), 12), 'yyyy-MM-dd'), // Default 1 year
-  monthlyRent: "",
-  rentCycle: "monthly" as 'monthly' | 'biweekly' | 'quarterly',
-  notes: "",
+    name: "",
+    phone: "",
+    roomNumber: "",
+    startDate: format(new Date(), 'yyyy-MM-dd'), // Default to today
+    contractEndDate: format(addMonths(new Date(), 12), 'yyyy-MM-dd'), // Default 1 year
+    monthlyRent: "",
+    rentCycle: "monthly" as 'monthly' | 'biweekly' | 'quarterly',
+    notes: "",
   });
-
- 
-
-
 
   const [isLoading, setIsLoading] = useState(false);
 
@@ -87,6 +84,15 @@ export default function AddTenant() {
     return;
   }
 
+    // Validate contract dates
+    if (formData.contractEndDate && formData.startDate > formData.contractEndDate) {
+      Alert.alert(
+        "Invalid Dates",
+        "Contract end date must be after move-in date.",
+        [{ text: "OK", style: "default" }]
+      );
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -149,32 +155,6 @@ export default function AddTenant() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* Rent Cycle Selector */}
-<View style={styles.inputContainer}>
-  <Text style={styles.inputLabel}>
-    Rent Cycle <Text style={styles.required}>*</Text>
-  </Text>
-  <View style={styles.cycleOptions}>
-    {['monthly', 'biweekly', 'quarterly'].map(cycle => (
-      <TouchableOpacity
-        key={cycle}
-        onPress={() => setFormData(prev => ({ ...prev, rentCycle: cycle as any }))}
-        style={[
-          styles.cycleOption,
-          formData.rentCycle === cycle && styles.cycleOptionSelected
-        ]}
-      >
-        <Text style={[
-          styles.cycleOptionText,
-          formData.rentCycle === cycle && styles.cycleOptionTextSelected
-        ]}>
-          {cycle.charAt(0).toUpperCase() + cycle.slice(1)}
-        </Text>
-      </TouchableOpacity>
-    ))}
-  </View>
-</View>
-
       {/* Content */}
       <ScrollView 
         style={styles.content}
@@ -221,21 +201,49 @@ export default function AddTenant() {
             icon={<Ionicons name="cash-outline" size={20} color="#6B7280" />}
           />
 
-          <InputField
+          {/* NEW: Date Inputs */}
+          <DateInput
             label="Move-in Date"
             value={formData.startDate}
-            onChange={(text) => setFormData((prev) => ({ ...prev, startDate: text }))}
-            placeholder="YYYY-MM-DD"
-            icon={<Ionicons name="calendar-outline" size={20} color="#6B7280" />}
+            onChange={(isoDate) => setFormData((prev) => ({ ...prev, startDate: isoDate }))}
+            required
+            maxDate={new Date()} // Move-in date shouldn't be in future
+            placeholder="DD/MM/YYYY"
           />
 
-          <InputField
-              label="Contract End Date"
-              value={formData.contractEndDate}
-              onChange={(text) => setFormData((prev) => ({ ...prev, contractEndDate: text }))}
-              placeholder="YYYY-MM-DD"
-              icon={<Ionicons name="calendar-outline" size={20} color="#6B7280" />}
-            />
+          <DateInput
+            label="Contract End Date"
+            value={formData.contractEndDate}
+            onChange={(isoDate) => setFormData((prev) => ({ ...prev, contractEndDate: isoDate }))}
+            minDate={new Date(formData.startDate)} // End date after start date
+            placeholder="DD/MM/YYYY (optional)"
+          />
+
+          {/* Rent Cycle Selector */}
+          <View style={styles.inputContainer}>
+            <Text style={styles.inputLabel}>
+              Rent Cycle <Text style={styles.required}>*</Text>
+            </Text>
+            <View style={styles.cycleOptions}>
+              {['monthly', 'biweekly', 'quarterly'].map(cycle => (
+                <TouchableOpacity
+                  key={cycle}
+                  onPress={() => setFormData(prev => ({ ...prev, rentCycle: cycle as any }))}
+                  style={[
+                    styles.cycleOption,
+                    formData.rentCycle === cycle && styles.cycleOptionSelected
+                  ]}
+                >
+                  <Text style={[
+                    styles.cycleOptionText,
+                    formData.rentCycle === cycle && styles.cycleOptionTextSelected
+                  ]}>
+                    {cycle.charAt(0).toUpperCase() + cycle.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
 
           <InputField
             label="Notes"
@@ -275,6 +283,7 @@ export default function AddTenant() {
   );
 }
 
+// Your existing styles remain exactly the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -428,44 +437,29 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
-  
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    color: '#1F2937',
+  cycleOptions: {
+  flexDirection: 'row',
+  gap: 8,
   },
-  card: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
+  cycleOption: {
+    flex: 1,
+    padding: 12,
     borderRadius: 8,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 12,
-    color: '#1F2937',
-  },
-  metricRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  metricLabel: {
-    fontSize: 14,
-    color: '#6B7280',
+  cycleOptionSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
   },
-  metricValue: {
+  cycleOptionText: {
     fontSize: 14,
-    fontWeight: '600',
     color: '#374151',
+    fontWeight: '500',
+  },
+  cycleOptionTextSelected: {
+    color: '#FFFFFF',
   },
 });
-
