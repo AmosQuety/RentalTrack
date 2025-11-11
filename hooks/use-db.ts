@@ -164,6 +164,9 @@ export const useDatabase = () => {
   const deleteTenant = useCallback(async (tenantId: number) => {
     await Database.deleteTenant(tenantId);
     dbEvents.emit('tenant_deleted');
+    // ADD THESE ADDITIONAL EVENTS
+    dbEvents.emit('payment_recorded'); // Payments are affected when tenant is deleted
+    dbEvents.emit('tenant_updated'); // Other tenants' stats might change
   }, []);
 
   const recordPayment = useCallback(async (payment: any) => {
@@ -215,7 +218,8 @@ export const useDatabase = () => {
     runHeartbeat,
     updateAllTenantStatuses: Database.updateAllTenantStatuses,
     resetCreditBalance: Database.resetCreditBalance, // ✅ NOW EXPORTED
-    
+     recalculatePaymentStats: Database.recalculatePaymentStats, // ✅ ADD THIS LINE
+
     // Reminder methods
     getUpcomingReminders: Database.getUpcomingReminders, // ✅ NOW EXPORTED
     getReminders: Database.getReminders,

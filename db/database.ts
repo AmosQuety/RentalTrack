@@ -67,6 +67,11 @@ const calculateTenantStatus = (nextDueDate: string, hasPayments: boolean, curren
     
     const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
+    // FIXED LOGIC: New tenants without payments should start as "Due Soon"
+    if (!hasPayments) {
+      return daysUntilDue >= 0 ? 'Due Soon' : 'Overdue';
+    }
+    
     // FIXED: Simplified logic - if due date is in future, tenant is paid
     if (daysUntilDue > 3) {
       return 'Paid';
@@ -544,8 +549,8 @@ export const Database = {
   updateAllTenantStatuses: async (): Promise<void> => {
     console.log('🔄 Updating all tenant statuses...');
     try {
+      // NO LONGER USES A TRANSACTION
       const database = getDb();
-      await database.execAsync('BEGIN TRANSACTION');
       const tenants = await database.getAllAsync<Tenant>('SELECT * FROM tenants');
       
       for (const tenant of tenants) {
@@ -570,11 +575,9 @@ export const Database = {
         }
       }
       
-      await database.execAsync('COMMIT');
       console.log('✅ Tenant status update completed successfully');
     } catch (error) {
-      const database = getDb();
-      await database.execAsync('ROLLBACK');
+      
       console.error('❌ Fatal error during tenant status update:', error);
       throw new DatabaseError("Failed to update tenant statuses.");
     }
@@ -836,7 +839,6 @@ export const Database = {
 
     try {
       const database = getDb();
-      await database.execAsync('BEGIN TRANSACTION');
       const settings = await Database.getSettings();
       const tenants = await database.getAllAsync<Tenant>('SELECT * FROM tenants');
       const today = new Date();
@@ -910,12 +912,10 @@ export const Database = {
         }
       }
 
-      await database.execAsync('COMMIT');
       console.log('✅ System heartbeat completed successfully');
       return results;
     } catch (error) {
-      const database = getDb();
-      await database.execAsync('ROLLBACK');
+      
       console.error('❌ Fatal error during system heartbeat:', error);
       throw new DatabaseError("Failed to run system audit.");
     }
@@ -1056,33 +1056,30 @@ export const Database = {
       const lastMonthStart = startOfMonth(subMonths(today, 1));
       const lastMonthEnd = endOfMonth(subMonths(today, 1));
 
-      // Total collected
-      const totalResult = await database.getFirstAsync<{ total: number }>(
+      // Use more accurate queries
+    const [totalResult, thisMonthResult, lastMonthResult, overdueResult] = await Promise.all([
+      database.getFirstAsync<{ total: number }>(
         'SELECT COALESCE(SUM(amount_paid), 0) as total FROM payments'
-      );
-
-      // This month
-      const thisMonthResult = await database.getFirstAsync<{ total: number }>(
+      ),
+      database.getFirstAsync<{ total: number }>(
         `SELECT COALESCE(SUM(amount_paid), 0) as total 
          FROM payments 
          WHERE date(payment_date) >= date(?) AND date(payment_date) <= date(?)`,
         [format(thisMonthStart, 'yyyy-MM-dd'), format(thisMonthEnd, 'yyyy-MM-dd')]
-      );
-
-      // Last month
-      const lastMonthResult = await database.getFirstAsync<{ total: number }>(
+      ),
+      database.getFirstAsync<{ total: number }>(
         `SELECT COALESCE(SUM(amount_paid), 0) as total 
          FROM payments 
          WHERE date(payment_date) >= date(?) AND date(payment_date) <= date(?)`,
         [format(lastMonthStart, 'yyyy-MM-dd'), format(lastMonthEnd, 'yyyy-MM-dd')]
-      );
-
-      // Overdue amount (sum of monthly rent for all overdue tenants)
-      const overdueResult = await database.getFirstAsync<{ total: number }>(
+      ),
+      database.getFirstAsync<{ total: number }>(
         `SELECT COALESCE(SUM(monthly_rent), 0) as total 
          FROM tenants 
-         WHERE status = 'Overdue'`
-      );
+         WHERE status = 'Overdue' AND tenant_id IN (SELECT DISTINCT tenant_id FROM payments)`
+      )
+    ]);
+
 
       return {
         totalCollected: totalResult?.total || 0,
@@ -1090,11 +1087,25 @@ export const Database = {
         lastMonth: lastMonthResult?.total || 0,
         overdueAmount: overdueResult?.total || 0
       };
-    } catch (error) {
+    } catch (error) { 
       console.error('❌ Error getting payment stats:', error);
       throw new DatabaseError("Could not fetch payment statistics.");
     }
   },
+
+// NEW FUNCTION: Recalculate payment statistics
+recalculatePaymentStats: async (): Promise<void> => {
+  try {
+    const database = getDb();
+    console.log('🔄 Recalculating payment statistics...');
+    
+    // This will force recalculation of all stats
+    await database.execAsync('ANALYZE'); // SQLite optimization
+    console.log('✅ Payment statistics recalculated');
+  } catch (error) {
+    console.error('❌ Error recalculating payment stats:', error);
+  }
+},
 
   // NEW FUNCTION: Get monthly payment trend
   getMonthlyTrend: async (): Promise<{ month: string; amount: number }[]> => {

@@ -1,50 +1,187 @@
-# Welcome to your Expo app 👋
+# 🏠 RentalTrack - Property Management App
+A modern, offline-first React Native mobile application for landlords to manage tenants, track rent payments, and automate reminders.
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+![React Native](https://img.shields.io/badge/React_Native-0.81.5-61DAFB?style=for-square&logo=react)![Expo](https://img.shields.io/badge/Expo-54.0.20-000020?style=for-square&logo=expo)![TypeScript](https://img.shields.io/badge/TypeScript-5.9.2-3178C6?style=for-square&logo=typescript)![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-square&logo=sqlite)
 
-## Get started
+## 📱 Features
 
-1. Install dependencies
+### 🏠 Tenant Management
+- Add, edit, and delete tenant profiles
+- Room number validation (prevents duplicates)
+- Contact information and notes
+- Contract dates tracking
 
-   ```bash
-   npm install
-   ```
+### 💰 Payment Tracking
+- Record rent payments with multiple methods
+- Automatic credit balance calculation
+- Payment history with detailed breakdowns
+- Partial payment support
 
-2. Start the app
+### 🔔 Smart Reminders
+- Automated rent due notifications
+- Configurable reminder timing
+- Actionable notifications (Mark as Paid, Snooze)
+- Local push notifications
 
-   ```bash
-   npx expo start
-   ```
+### 📊 Analytics & Insights
+- Payment trends and statistics
+- Monthly collection reports
+- Overdue tracking
+- Visual charts and graphs
 
-In the output, you'll find options to open the app in a
+### ⚙️ Advanced Features
+- **Offline-first** - Works completely offline
+- Multiple rent cycles (Monthly, Bi-weekly, Quarterly)
+- Auto-suspend for overdue tenants
+- Contract expiration reminders
+- Dark/Light theme support
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## 🛠 Tech Stack
+- **Frontend:** React Native 0.81.5, Expo 54.0.20
+- **Language:** TypeScript 5.9.2
+- **Database:** SQLite with `expo-sqlite`
+- **Navigation:** Expo Router (File-based routing)
+- **Notifications:** Expo Notifications
+- **UI Components:** Custom design system
+- **State Management:** React Hooks + Context
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## 📁 Project Structure
+```text
+RentalTrack/
+├── app/                    # Expo Router app directory
+│   ├── (tabs)/            # Tab navigation
+│   │   ├── index.tsx      # Dashboard
+│   │   ├── tenants.tsx    # Tenants list
+│   │   ├── analytics.tsx  # Analytics
+│   │   └── reminders.tsx  # Reminders
+│   ├── add-tenant.tsx     # Add tenant form
+│   ├── edit-tenant.tsx    # Edit tenant form
+│   ├── tenant-details.tsx # Tenant details view
+│   └── record-payment.tsx # Payment recording
+├── components/            # Reusable components
+│   ├── DateInput.tsx     # Smart date input
+│   └── ErrorBoundary.tsx # Error handling
+├── hooks/                 # Custom React hooks
+│   ├── use-db.ts         # Database operations
+│   └── use-auto-refresh.ts # Auto-refresh logic
+├── libs/                  # Type definitions
+│   └── types.ts          # TypeScript interfaces
+├── services/              # Business logic
+│   ├── notifications.ts  # Notification service
+│   └── database.ts       # Database layer
+└── utils/                 # Utilities
+    └── dateParser.ts     # Date parsing logic
 
-## Get a fresh project
+## 🚀 Getting Started
 
-When you're ready, run:
+### Prerequisites
+- Node.js 18+
+- Expo CLI
+- Android Studio / Xcode (for emulators)
 
+### Installation
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/yourusername/rentaltrack.git
+    cd rentaltrack
+    ```
+2.  **Install dependencies**
+    ```bash
+    npm install
+    ```
+3.  **Start development server**
+    ```bash
+    npx expo start
+    ```
+
+### Building for Production
 ```bash
-npm run reset-project
+# Build for Android
+eas build --platform android
+
+# Build for iOS
+eas build --platform ios
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+---
 
-## Learn more
+## 📊 Database Schema
+The app uses SQLite with the following main tables:
+- **tenants** - Tenant information and status
+- **payments** - Payment records and calculations
+- **reminders** - Scheduled notifications
+- **settings** - User preferences
+- **payment_cancellations** - Audit trail for cancelled payments
 
-To learn more about developing your project with Expo, look at the following resources:
+---
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## 🎯 Key Features Explained
 
-## Join the community
+### 🔄 Auto-Refresh System
+Components automatically refresh when data changes using a custom hook system that listens to database events.
 
-Join our community of developers creating universal apps.
+### 💡 Smart Payment Calculations
+- Tracks credit balances across payments
+- Handles partial payments gracefully
+- Calculates next due dates automatically
+- Supports different rent cycles
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### 📅 Intelligent Date Handling
+- Smart date parser with multiple input formats
+- Quick-select options (Today, Yesterday, Tomorrow)
+- Calendar picker integration
+- Date validation and formatting
+
+---
+
+## 🤝 Contributing
+We welcome contributions! Please see our **Contributing Guide** for details.
+
+### Development Workflow
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+This project is licensed under the MIT License - see the `LICENSE` file for details.
+
+## 🏢 Commercial Use
+This app is designed for individual landlords and small property managers. It's perfect for:
+- Individual property owners
+- Small rental businesses
+- Real estate agents
+- Vacation rental hosts
+
+## 💼 Business Model
+- One-time purchase model
+- Offline-first for data privacy
+- No subscription fees
+- Customizable for different markets
+
+## 🔒 Privacy & Security
+- ✅ **Offline-first** - All data stays on your device
+- ✅ **No cloud dependencies** - Works without an internet connection
+- ✅ **Local database** - SQLite encryption available
+- ✅ **No tracking** - Complete user privacy
+
+## 📞 Support
+- **Documentation:** GitHub Wiki
+- **Issues:** GitHub Issues
+- **Email:** support@rentaltrack.app
+
+## 🚀 Roadmap
+- [ ] Multi-language support
+- [ ] Cloud backup options (e.g., iCloud/Google Drive)
+- [ ] PDF receipt generation
+- [ ] SMS reminder integration
+- [ ] Web dashboard version
+
+<br>
+
+<p align="center">
+  Built with ❤️ for landlords worldwide
+</p>

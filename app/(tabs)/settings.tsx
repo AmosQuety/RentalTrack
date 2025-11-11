@@ -1,4 +1,4 @@
-// app/(tabs)/settings.tsx
+// src/screens/Settings.tsx
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -10,27 +10,20 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useDatabase } from '../../hooks/use-db';
-import { Settings } from '../../libs/types';
-import { BackupService } from '../../services/backup';
+import { Database } from '../../db/database';
+import { Settings as SettingsType } from '../../libs/types';
 
-// Import your test functions
-import { testDatabaseTransactions } from '../../tests/database-transactions.test';
-import { testEdgeCases } from '../../tests/edge-cases.test';
-import { testNotificationFlow } from '../../tests/notification-flow.test';
 
-export default function SettingsScreen() {
-  const { isInitialized, getSettings, updateSettings } = useDatabase();
-  const [settings, setSettings] = useState<Settings | null>(null);
+
+const Settings = () => {
+  const [settings, setSettings] = useState<SettingsType | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showDeveloperOptions, setShowDeveloperOptions] = useState(false);
   const [tapCount, setTapCount] = useState(0);
 
   const loadSettings = async () => {
-    if (!isInitialized) return;
-    
     try {
-      const settingsData = await getSettings();
+      const settingsData = await Database.getSettings();
       setSettings(settingsData);
     } catch (error) {
       console.error('Failed to load settings:', error);
@@ -39,16 +32,16 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     loadSettings();
-  }, [isInitialized]);
+  }, []);
 
-  const updateSetting = async (key: keyof Settings, value: any) => {
+  const updateSetting = async (key: keyof SettingsType, value: any) => {
     if (!settings) return;
 
     setIsLoading(true);
     try {
-      await updateSettings({ [key]: value });
+      await Database.updateSettings({ [key]: value });
       setSettings(prev => prev ? { ...prev, [key]: value } : null);
-      await loadSettings();
+      await loadSettings(); // Reload to ensure consistency
     } catch (error) {
       console.error('Failed to update setting:', error);
       Alert.alert('Error', 'Failed to update setting');
@@ -68,10 +61,22 @@ export default function SettingsScreen() {
   const handleImportData = async () => {
     try {
       await BackupService.importData();
+      // Reload settings after import in case they were updated
+      await loadSettings();
     } catch (error) {
       Alert.alert('Error', 'Failed to import data');
     }
   };
+
+  const formatDisplayDate = (isoDate: string): string => {
+      const date = new Date(isoDate);
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+  };
+
+
 
   // Secret tap handler to reveal developer options
   const handleVersionTap = () => {
@@ -85,61 +90,9 @@ export default function SettingsScreen() {
     }
   };
 
-  // Test runner functions
-  const runAllTests = async () => {
-    Alert.alert(
-      'Run All Tests?',
-      'This will test notifications, database transactions, and edge cases. Test data will be created and cleaned up automatically.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Run Tests', 
-          onPress: async () => {
-            console.log('🚀 RUNNING ALL TESTS...');
-            await testNotificationFlow();
-            await testDatabaseTransactions();
-            await testEdgeCases();
-            console.log('🎉 ALL TESTS COMPLETED');
-          }
-        }
-      ]
-    );
-  };
+  
 
-  const runNotificationTest = async () => {
-    Alert.alert(
-      'Test Notifications?',
-      'This will test the notification flow including creating reminders and handling actions.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Test', onPress: testNotificationFlow }
-      ]
-    );
-  };
-
-  const runTransactionTest = async () => {
-    Alert.alert(
-      'Test Database Transactions?',
-      'This will test database integrity and rollback functionality.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Test', onPress: testDatabaseTransactions }
-      ]
-    );
-  };
-
-  const runEdgeCaseTest = async () => {
-    Alert.alert(
-      'Test Edge Cases?',
-      'This will test various edge cases like partial payments, backdating, and deletion cascades.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Test', onPress: testEdgeCases }
-      ]
-    );
-  };
-
-  if (!isInitialized || !settings) {
+  if (!settings) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -149,7 +102,7 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
       </View>
@@ -220,132 +173,69 @@ export default function SettingsScreen() {
       </View>
 
       {/* General Settings */}
-<View style={styles.section}>
-  <Text style={styles.sectionTitle}>General</Text>
-  
-  {/* REMOVED: Currency and Theme settings */}
-  <View style={styles.settingGroup}>
-    <Text style={styles.settingLabel}>Auto-Suspend After (Days)</Text>
-    <View style={styles.optionsContainer}>
-      {[15, 30, 45, 60].map(days => (
-        <TouchableOpacity
-          key={days}
-          onPress={() => updateSetting('auto_suspend_days', days)}
-          style={[
-            styles.optionButton,
-            settings.auto_suspend_days === days && styles.optionButtonSelected
-          ]}
-        >
-          <Text style={[
-            styles.optionText,
-            settings.auto_suspend_days === days && styles.optionTextSelected
-          ]}>
-            {days} days
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  </View>
-
-  <View style={styles.settingGroup}>
-    <Text style={styles.settingLabel}>Contract Reminder (Days Before)</Text>
-    <View style={styles.optionsContainer}>
-      {[30, 60, 90].map(days => (
-        <TouchableOpacity
-          key={days}
-          onPress={() => updateSetting('contract_reminder_days', days)}
-          style={[
-            styles.optionButton,
-            settings.contract_reminder_days === days && styles.optionButtonSelected
-          ]}
-        >
-          <Text style={[
-            styles.optionText,
-            settings.contract_reminder_days === days && styles.optionTextSelected
-          ]}>
-            {days} days
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-  </View>
-</View>
-
-{/* Contract Reminder Settings */}
-<View style={styles.settingGroup}>
-  <Text style={styles.settingLabel}>Contract Reminder (Days Before)</Text>
-  <View style={styles.optionsContainer}>
-    {[30, 60, 90].map(days => (
-      <TouchableOpacity
-        key={days}
-        onPress={() => updateSetting('contract_reminder_days', days)}
-        style={[
-          styles.optionButton,
-          settings.contract_reminder_days === days && styles.optionButtonSelected
-        ]}
-      >
-        <Text style={[
-          styles.optionText,
-          settings.contract_reminder_days === days && styles.optionTextSelected
-        ]}>
-          {days} days
-        </Text>
-      </TouchableOpacity>
-    ))}
-  </View>
-</View>
-
-      {/* Data Management */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Data Management</Text>
+        <Text style={styles.sectionTitle}>General</Text>
         
-        <TouchableOpacity
-          onPress={handleExportData}
-          style={[styles.dataButton, styles.exportButton]}
-        >
-          <Text style={styles.exportButtonText}>Export Data</Text>
-        </TouchableOpacity>
+        <View style={styles.settingGroup}>
+          <Text style={styles.settingLabel}>Auto-Suspend After (Days)</Text>
+          <View style={styles.optionsContainer}>
+            {[15, 30, 45, 60].map(days => (
+              <TouchableOpacity
+                key={days}
+                onPress={() => updateSetting('auto_suspend_days', days)}
+                style={[
+                  styles.optionButton,
+                  settings.auto_suspend_days === days && styles.optionButtonSelected
+                ]}
+              >
+                <Text style={[
+                  styles.optionText,
+                  settings.auto_suspend_days === days && styles.optionTextSelected
+                ]}>
+                  {days} days
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
-        <TouchableOpacity
-          onPress={handleImportData}
-          style={[styles.dataButton, styles.importButton]}
-        >
-          <Text style={styles.importButtonText}>Import Data</Text>
-        </TouchableOpacity>
+        <View style={styles.settingGroup}>
+          <Text style={styles.settingLabel}>Contract Reminder (Days Before)</Text>
+          <View style={styles.optionsContainer}>
+            {[30, 60, 90].map(days => (
+              <TouchableOpacity
+                key={days}
+                onPress={() => updateSetting('contract_reminder_days', days)}
+                style={[
+                  styles.optionButton,
+                  settings.contract_reminder_days === days && styles.optionButtonSelected
+                ]}
+              >
+                <Text style={[
+                  styles.optionText,
+                  settings.contract_reminder_days === days && styles.optionTextSelected
+                ]}>
+                  {days} days
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
       </View>
+
+      
 
       {/* Developer Options (Hidden) */}
       {showDeveloperOptions && (
         <View style={[styles.section, styles.developerSection]}>
           <Text style={styles.sectionTitle}>🧪 Developer Tests</Text>
           
-          <TouchableOpacity
-            onPress={runAllTests}
-            style={[styles.testButton, styles.runAllButton]}
-          >
-            <Text style={styles.testButtonText}>Run All Tests</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={runNotificationTest}
-            style={[styles.testButton, styles.notificationTestButton]}
-          >
-            <Text style={styles.testButtonText}>Test Notifications</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={runTransactionTest}
-            style={[styles.testButton, styles.transactionTestButton]}
-          >
-            <Text style={styles.testButtonText}>Test Database Transactions</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={runEdgeCaseTest}
-            style={[styles.testButton, styles.edgeCaseTestButton]}
-          >
-            <Text style={styles.testButtonText}>Test Edge Cases</Text>
-          </TouchableOpacity>
+          {/* Test buttons commented out since test imports are removed */}
+          <Text style={styles.developerNote}>
+            Test functionality is currently disabled. Enable by uncommenting test imports and functions.
+          </Text>
+          
+          
 
           <Text style={styles.developerNote}>
             Check console logs for detailed test results
@@ -363,9 +253,10 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
         <View style={styles.infoRow}>
+
           <Text style={styles.infoLabel}>Build Date</Text>
           <Text style={styles.infoValue}>
-            {new Date().toLocaleDateString()}
+               17/10/2025
           </Text>
         </View>
         
@@ -378,12 +269,15 @@ export default function SettingsScreen() {
       </View>
     </ScrollView>
   );
-}
+};
+
+export default Settings;
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     backgroundColor: '#F9FAFB',
+    padding: 20,
   },
   centerContainer: {
     flex: 1,
@@ -397,8 +291,12 @@ const styles = StyleSheet.create({
   header: {
     padding: 16,
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderRadius: 12,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   title: {
     fontSize: 24,
@@ -407,13 +305,12 @@ const styles = StyleSheet.create({
   },
   section: {
     backgroundColor: '#FFFFFF',
-    margin: 16,
-    padding: 16,
-    borderRadius: 8,
+    marginBottom: 16,
+    padding: 20,
+    borderRadius: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     elevation: 2,
   },
   developerSection: {
@@ -480,50 +377,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignItems: 'center',
   },
-  exportButton: {
-    backgroundColor: '#DBEAFE',
-    borderWidth: 1,
-    borderColor: '#3B82F6',
-  },
-  importButton: {
-    backgroundColor: '#D1FAE5',
-    borderWidth: 1,
-    borderColor: '#10B981',
-  },
-  exportButtonText: {
-    color: '#1E40AF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  importButtonText: {
-    color: '#065F46',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  testButton: {
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 8,
-    alignItems: 'center',
-  },
-  runAllButton: {
-    backgroundColor: '#10B981',
-  },
-  notificationTestButton: {
-    backgroundColor: '#3B82F6',
-  },
-  transactionTestButton: {
-    backgroundColor: '#8B5CF6',
-  },
-  edgeCaseTestButton: {
-    backgroundColor: '#F59E0B',
-  },
-  testButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+  
+  
+  
   developerNote: {
     fontSize: 12,
     color: '#6B7280',

@@ -1,1 +1,0 @@
-npx expo start --dev-client --private-key-path ../keys/private-key.pem

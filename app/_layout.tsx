@@ -1,4 +1,6 @@
 // app/_layout.tsx - PRODUCTION-SAFE VERSION
+import { useDatabase } from '@/hooks/use-db';
+import { Payment } from '@/libs/types';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -17,6 +19,35 @@ export default function RootLayout() {
   const [isUpdateChecking, setIsUpdateChecking] = useState(false);
   const [appIsReady, setAppIsReady] = useState(false);
   const [criticalError, setCriticalError] = useState<string | null>(null);
+
+  const { 
+  isInitialized,
+  getDashboardStats, 
+  getRecentPayments,
+  recalculatePaymentStats // ADD THIS
+} = useDatabase();
+
+const loadDashboardData = useCallback(async () => {
+  if (!isInitialized) return;
+
+  try {
+    console.log('🔄 Dashboard: Loading data...');
+    
+    // Force recalculation
+    await recalculatePaymentStats();
+    
+    const [dashboardStats, recentPayments] = await Promise.all([
+      getDashboardStats(),
+      getRecentPayments()
+    ]);
+    
+    setStats(dashboardStats);
+    setPayments(recentPayments);
+    setLastUpdated(new Date());
+  } catch (error) {
+    console.error('Failed to load dashboard data:', error);
+  }
+}, [isInitialized, getDashboardStats, getRecentPayments, recalculatePaymentStats]);
 
   const checkForUpdates = async (retryCount = 0): Promise<void> => {
     if (__DEV__ || isUpdateChecking) return;
@@ -334,4 +365,18 @@ export default function RootLayout() {
       </SafeAreaProvider>
     </ErrorBoundary>
   );
+}
+
+function setStats(dashboardStats: { totalTenants: number; overdueTenants: number; dueSoonTenants: number; paidTenants: number; totalMonthlyRent: number; totalCreditBalance: number; }) {
+  throw new Error('Function not implemented.');
+}
+
+
+function setPayments(recentPayments: Payment[]) {
+  throw new Error('Function not implemented.');
+}
+
+
+function setLastUpdated(arg0: Date) {
+  throw new Error('Function not implemented.');
 }

@@ -104,7 +104,7 @@ export default function Dashboard() {
       }
     >
       <View style={styles.header}>
-        <Text style={styles.title}>Rental Dashboard</Text>
+        
         <Text style={styles.subtitle}>Pull down to refresh</Text>
       </View>
       
@@ -228,11 +228,7 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 16,
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
+  
   subtitle: {
     fontSize: 12,
     color: '#6B7280',

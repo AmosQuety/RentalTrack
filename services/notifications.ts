@@ -178,7 +178,7 @@ export class NotificationService {
 
       // Create clear, informative message
       const message = customMessage || 
-        `Rent payment of ${tenant.monthly_rent.toLocaleString()} UGX is due on ${new Date(dueDate).toLocaleDateString()}`;
+        `Rent payment of ${tenant.monthly_rent.toLocaleString()} UGX is due on ${this.formatDisplayDate(dueDate)}`;
 
       // Insert reminder into database
       await dbInstance.runAsync(
@@ -189,9 +189,9 @@ export class NotificationService {
 
       // Schedule the actual notification
       await this.scheduleNotification(
-        `💰 Rent Due Soon: ${tenant.name}`,
-        `Room ${tenant.room_number} - ${message}`,
-        { date: reminderDate },
+          `💰 Rent Due Soon: ${tenant.name}`,
+            `Room ${tenant.room_number} - Rent payment of ${tenant.monthly_rent.toLocaleString()} UGX is due on ${this.formatDisplayDate(dueDate)}`,
+            { date: reminderDate },
         {
           tenantId,
           tenantName: tenant.name,
@@ -211,6 +211,17 @@ export class NotificationService {
       throw error;
     }
   }
+
+  // Add this helper method to the NotificationService class:
+private static formatDisplayDate(isoDate: string): string {
+  const date = new Date(isoDate);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+
 
   static async snoozeReminder(
     tenantId: number,

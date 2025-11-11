@@ -5,35 +5,44 @@ import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native
 import { useAutoRefresh, useDatabase } from '../../hooks/use-db';
 
 export default function Analytics() {
-  const { isInitialized, getPaymentStats, getMonthlyTrend } = useDatabase();
+  const { isInitialized, getPaymentStats, getMonthlyTrend, recalculatePaymentStats } = useDatabase();
   const [stats, setStats] = useState({
     totalCollected: 0,
     thisMonth: 0,
     lastMonth: 0,
     overdueAmount: 0,
   });
-  const [monthlyTrend, setMonthlyTrend] = useState([]);
+  const [monthlyTrend, setMonthlyTrend] = useState<{ month: string; amount: number }[]>([]);
+   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
 
   const loadStats = useCallback(async () => {
     if (!isInitialized) return;
 
     try {
       console.log('🔄 Analytics: Loading data...');
-      const paymentStats = await getPaymentStats();
-      const trend = await getMonthlyTrend();
+      await recalculatePaymentStats();
+
+      const [paymentStats, trend] = await Promise.all([
+        getPaymentStats(),
+        getMonthlyTrend()
+      ]);
+
       setStats(paymentStats);
       setMonthlyTrend(trend);
+      setLastUpdated(new Date());
       console.log('✅ Analytics: Data loaded');
     } catch (error) {
       console.error('Failed to load stats:', error);
     }
-  }, [isInitialized, getPaymentStats, getMonthlyTrend]);
+  }, [isInitialized, getPaymentStats, getMonthlyTrend, recalculatePaymentStats]);
 
   // Auto-refresh on database changes
   const { isRefreshing, refresh } = useAutoRefresh(loadStats, [
     'payment_recorded',
     'tenant_added',
-    'tenant_deleted'
+    'tenant_deleted',
+    'tenant_updated',
+    'settings_updated',
   ]);
 
   // Initial load
@@ -49,12 +58,22 @@ export default function Analytics() {
     }, [loadStats])
   );
 
+  // Add periodic refresh (every 30 seconds when in focus)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadStats();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [loadStats]);
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-UG', {
       minimumFractionDigits: 0,
     }).format(amount);
-  };
+  }
 
+  
   const maxAmount = Math.max(...monthlyTrend.map((m) => m.amount), 1);
   const monthGrowth =
     stats.lastMonth > 0
@@ -73,7 +92,7 @@ export default function Analytics() {
         />
       }
     >
-      <Text style={styles.pullText}>Pull down to refresh</Text>
+       <Text style={styles.pullText}>Pull down to refresh • Last updated: {lastUpdated.toLocaleTimeString()}</Text>
 
       {/* Stats Cards */}
       <View style={styles.statsGrid}>

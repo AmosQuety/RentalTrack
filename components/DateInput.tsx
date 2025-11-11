@@ -6,14 +6,14 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    Keyboard,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Keyboard,
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from 'react-native';
 import { DateParser, ParseResult } from '../utils/dateParser';
 
@@ -52,6 +52,10 @@ export const DateInput: React.FC<DateInputProps> = ({
   const showError = isTouched && (internalError || externalError);
   const errorMessage = internalError || externalError;
 
+
+  const today = new Date();
+  const todayDisplay = `${today.getDate().toString().padStart(2, '0')}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getFullYear()}`;
+
   // Initialize display value from ISO value
   useEffect(() => {
     if (value) {
@@ -67,17 +71,6 @@ export const DateInput: React.FC<DateInputProps> = ({
     }
   }, [value]);
 
-  // Handle text input changes with debouncing
-  useEffect(() => {
-    if (!isTouched) return;
-
-    const timeoutId = setTimeout(() => {
-      handleTextParse(displayValue);
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [displayValue, isTouched]);
-
   // Event Handlers
   const handleTextParse = (text: string) => {
     if (!text.trim()) {
@@ -85,6 +78,13 @@ export const DateInput: React.FC<DateInputProps> = ({
       onChange('');
       return;
     }
+
+    // Replace with only manual validation on blur
+  const handleBlur = () => {
+    if (displayValue.trim()) {
+      handleTextParse(displayValue);
+    }
+  };
 
     const result: ParseResult = DateParser.parseUserInput(text);
     
@@ -168,7 +168,7 @@ export const DateInput: React.FC<DateInputProps> = ({
         onChangeText={handleTextChange}
         onFocus={handleFocus}
         onBlur={handleBlur}
-        placeholder={placeholder}
+        placeholder={todayDisplay}
         placeholderTextColor="#9CA3AF"
         keyboardType="numbers-and-punctuation"
         returnKeyType="done"

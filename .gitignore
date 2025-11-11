@@ -83,3 +83,16 @@ coverage/
 # Temporary files
 .tmp/
 temp/
+
+# Certificate files
+certs/
+*.pem
+*.crt
+*.key
+
+# Documentation 
+future work.docx
+How_to_run.txt
+
+# Expo TypeScript env file 
+expo-env.dts

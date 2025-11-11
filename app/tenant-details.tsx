@@ -57,6 +57,15 @@ export default function TenantDetails() {
     }, [loadTenantData])
   );
 
+  const formatDisplayDate = (isoDate: string): string => {
+      const date = new Date(isoDate);
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+  };
+
+
   const handleDeleteTenant = () => {
     Alert.alert(
       'Delete Tenant',
@@ -111,7 +120,7 @@ export default function TenantDetails() {
           <View style={styles.paymentFooter}>
             <Text style={styles.nextDue}>
               Next due: <Text style={styles.nextDueDate}>
-                {new Date(payment.next_due_date).toLocaleDateString()}
+                {formatDisplayDate(payment.next_due_date)}
               </Text>
             </Text>
             <Text style={styles.balanceDueNote}>
@@ -145,7 +154,7 @@ export default function TenantDetails() {
       <View style={styles.paymentFooter}>
         <Text style={styles.nextDue}>
           Next due: <Text style={styles.nextDueDate}>
-            {new Date(payment.next_due_date).toLocaleDateString()}
+            {formatDisplayDate(payment.next_due_date)}
           </Text>
         </Text>
       </View>
@@ -228,14 +237,14 @@ export default function TenantDetails() {
   <View style={styles.detailRow}>
     <Text style={styles.detailLabel}>Contract End:</Text>
     <Text style={styles.detailValue}>
-      {new Date(tenant.contract_end_date).toLocaleDateString()}
+      {formatDisplayDate(tenant.contract_end_date)}
     </Text>
   </View>
 )}
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Move-in Date:</Text>
           <Text style={styles.detailValue}>
-            {new Date(tenant.start_date).toLocaleDateString()}
+            {formatDisplayDate(tenant.start_date)}
           </Text>
         </View>
         
@@ -288,7 +297,7 @@ export default function TenantDetails() {
                       {payment.amount_paid.toLocaleString()} UGX
                     </Text>
                     <Text style={styles.paymentMethod}>
-                      {payment.payment_method} • {new Date(payment.payment_date).toLocaleDateString()}
+                      {payment.payment_method} • {formatDisplayDate(payment.payment_date)}
                     </Text>
                   </View>
                   <View style={[

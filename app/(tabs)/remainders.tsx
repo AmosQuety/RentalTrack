@@ -30,6 +30,14 @@ export default function RemindersScreen() {
     loadReminders();
   }, [isInitialized]);
 
+  const formatDisplayDate = (isoDate: string): string => {
+  const date = new Date(isoDate);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Pending': return '#F59E0B';
@@ -89,10 +97,10 @@ export default function RemindersScreen() {
           
           <View style={styles.datesContainer}>
             <Text style={styles.dateText}>
-              Due: {new Date(reminder.due_date).toLocaleDateString()}
+               Due: {formatDisplayDate(reminder.due_date)}
             </Text>
             <Text style={styles.dateText}>
-              Reminder: {new Date(reminder.reminder_date).toLocaleDateString()}
+              Reminder: {formatDisplayDate(reminder.reminder_date)}
             </Text>
           </View>
         </View>
@@ -197,15 +205,3 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
 });
-
-// app/(tabs)/reminders.tsx
-// Logic:
-// Fetches upcoming reminders based on a daysAhead parameter.
-// Displays tenant name, room, message, and dates.
-// Improvements for Production:
-// Reminder Actions: The notification service schedules actions like "Mark Paid" or "Snooze". This screen should provide similar functionality to act on reminders directly (e.g., mark as paid from here, snooze from here, or dismiss a reminder).
-// Date Display: toLocaleDateString() is locale-dependent. Ensure you're showing dates in a format preferred by the user (from settings or device locale).
-// Filtering/Sorting: For many reminders, you'd want options to filter by status, sort by date, or show all.
-// Pagination/Load More: If there could be many reminders, implement pagination.
-// Empty State: Clear empty state message.
-// getStatusColor: Again, extract this to a shared utility.
