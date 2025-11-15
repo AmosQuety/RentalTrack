@@ -84,11 +84,7 @@ coverage/
 .tmp/
 temp/
 
-# Certificate files
-certs/
-*.pem
-*.crt
-*.key
+
 
 # Documentation 
 future work.docx
