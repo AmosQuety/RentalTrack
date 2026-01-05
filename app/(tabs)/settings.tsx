@@ -249,7 +249,7 @@ const Settings = () => {
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Version</Text>
           <TouchableOpacity onPress={handleVersionTap}>
-            <Text style={styles.infoValue}>1.0.0</Text>
+            <Text style={styles.infoValue}>1.1.0</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.infoRow}>

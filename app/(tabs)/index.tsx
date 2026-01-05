@@ -169,7 +169,7 @@ export default function Dashboard() {
           style={styles.actionButton}
           onPress={() => router.push('/add-tenant')}
         >
-          <Text style={styles.actionButtonText}>Add Tenant</Text>
+          <Text style={styles.actionButtonText}>Add Tenant(s)</Text>
         </TouchableOpacity>
       </View>
 
