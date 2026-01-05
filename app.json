@@ -2,7 +2,7 @@
   "expo": {
     "name": "RentalTrack",
     "slug": "RentalTrack",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rentaltrack",
@@ -52,12 +52,8 @@
       "url": "https://u.expo.dev/8c12112f-518d-4393-a1a1-b6c1a5ec4cb6",
       "fallbackToCacheTimeout": 0,
       "checkAutomatically": "ON_LOAD",
-      "enabled": true,
-      "codeSigningCertificate": "./certs/certificate.pem",
-      "codeSigningMetadata": {
-        "keyid": "main",
-        "alg": "rsa-v1_5-sha256"
-      }
+      "enabled": true
+      
     }
   }
 }
