@@ -89,7 +89,7 @@ const calculateTenantStatus = (nextDueDate: string, hasPayments: boolean, curren
 /**
  * Get tenant's current next due date - FIXED VERSION
  */
-const getTenantNextDueDate = async (tenantId: number, database: SQLite.SQLiteDatabase): Promise<string> => {
+export const getTenantNextDueDate = async (tenantId: number, database: SQLite.SQLiteDatabase): Promise<string> => {
   try {
     // Get tenant details
     const tenant = await database.getFirstAsync<Tenant>(
@@ -99,18 +99,34 @@ const getTenantNextDueDate = async (tenantId: number, database: SQLite.SQLiteDat
     if (!tenant) throw new Error('Tenant not found for due date calculation');
 
     // Try to get from last payment
-    const lastPayment = await database.getFirstAsync<{ next_due_date: string }>(
-      'SELECT next_due_date FROM payments WHERE tenant_id = ? ORDER BY next_due_date DESC, payment_id DESC LIMIT 1',
+    const lastPayment = await database.getFirstAsync<{ 
+      next_due_date: string ;
+      payment_date: string;
+    }>(
+      'SELECT next_due_date, payment_date FROM payments WHERE tenant_id = ? ORDER BY next_due_date DESC, payment_id DESC LIMIT 1',
       [tenantId]
     );
 
     if (lastPayment?.next_due_date) {
-      return lastPayment.next_due_date;
+      let nextDue = parseISO(lastPayment.next_due_date);
+      const today = new Date();
+
+      // If next due date is in the past, roll forward until in future
+      while (nextDue <= today) {
+        nextDue = calculateNextDueDate(nextDue, tenant.rent_cycle || 'monthly');
+      }
+      return format(nextDue, 'yyyy-MM-dd');
     }
 
-    // Calculate from start date if no payments
-    const firstDueDate = calculateNextDueDate(parseISO(tenant.start_date), tenant.rent_cycle || 'monthly');
-    return format(firstDueDate, 'yyyy-MM-dd');
+    // No payments found, start from tenant start date
+    let nextDue = calculateNextDueDate(parseISO(tenant.start_date), tenant.rent_cycle || 'monthly');
+    const today = new Date();
+
+     // Advance to next due date if start date is in past
+    while (nextDue <= today) {
+      nextDue = calculateNextDueDate(nextDue, tenant.rent_cycle || 'monthly');
+    }
+    return format(nextDue, 'yyyy-MM-dd');
 
   } catch (error) {
     console.error('Error getting next due date for tenant:', tenantId, error);

@@ -143,6 +143,24 @@ const loadDashboardData = useCallback(async () => {
     prepare();
   }, []);
 
+  
+  useEffect(() => {
+    // Schedule initial check
+    const initialCheck = setTimeout(() => {
+      NotificationService.scheduleUpcomingReminders();
+    }, 5000); // Wait 5 seconds after app loads
+    
+    // Then check daily
+    const dailyCheck = setInterval(() => {
+      NotificationService.scheduleUpcomingReminders();
+    }, 24 * 60 * 60 * 1000); // 24 hours
+    
+    return () => {
+      clearTimeout(initialCheck);
+      clearInterval(dailyCheck);
+    };
+  }, []);
+
   const onLayoutRootView = useCallback(async () => {
     if (appIsReady) {
       await SplashScreen.hideAsync();

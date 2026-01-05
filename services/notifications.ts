@@ -1,16 +1,19 @@
 // services/notifications.ts
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
+import * as SQLite from 'expo-sqlite';
 import { Alert, Platform } from 'react-native';
+import { getTenantNextDueDate } from '../db/database';
+
 
 let db: any = null;
 
-async function getDB() {
+async function getDB(): Promise<SQLite.SQLiteDatabase | null> {
   if (!db && Platform.OS !== 'web') {
     const SQLite = await import('expo-sqlite');
     db = SQLite.openDatabaseSync('RentReminderDB');
   }
-  return db;
+  return db as SQLite.SQLiteDatabase;
 }
 
 // Configure notification handler - Shows notifications even when app is in foreground
@@ -134,6 +137,62 @@ export class NotificationService {
       return null;
     }
   }
+
+  // Add this method to the NotificationService class
+static async scheduleUpcomingReminders(): Promise<void> {
+  try {
+    console.log('🔄 Checking for upcoming due dates to schedule reminders...');
+    
+    // const Database = (await import('../db/database')).Database;
+    const dbInstance = await getDB();
+    
+    if (!dbInstance) {
+      console.warn('⚠️ Database not available for scheduling reminders');
+      return;
+    }
+    
+    // Get all tenants with their next due dates
+    const tenants = await dbInstance.getAllAsync<{
+      tenant_id: number;
+      name: string;
+      room_number: string;
+      monthly_rent: number;
+      status: string;
+      start_date: string;
+    }>('SELECT tenant_id, name, room_number, monthly_rent, status, start_date FROM tenants');
+    
+    for (const tenant of tenants) {
+      try {
+        // Get tenant's current next due date
+        const nextDueDate = await getTenantNextDueDate(tenant.tenant_id, dbInstance);
+        const dueDate = new Date(nextDueDate);
+        const today = new Date();
+        
+        // Check if due date is in the future
+        if (dueDate > today) {
+          // Check if a reminder already exists for this due date
+          const existingReminder = await dbInstance.getFirstAsync<{ reminder_id: number }>(
+            `SELECT reminder_id FROM reminders 
+             WHERE tenant_id = ? AND due_date = ? AND status = 'Pending'`,
+            [tenant.tenant_id, nextDueDate]
+          );
+          
+          // If no reminder exists, create one
+          if (!existingReminder) {
+            await this.createReminder(tenant.tenant_id, nextDueDate);
+            console.log(`✅ Scheduled reminder for ${tenant.name} due on ${nextDueDate}`);
+          }
+        }
+      } catch (tenantError) {
+        console.error(`❌ Error processing tenant ${tenant.tenant_id}:`, tenantError);
+      }
+    }
+    
+    console.log('✅ Upcoming reminders scheduling completed');
+  } catch (error) {
+    console.error('❌ Error scheduling upcoming reminders:', error);
+  }
+}
 
   static async createReminder(
     tenantId: number,
