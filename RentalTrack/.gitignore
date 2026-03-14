@@ -1,0 +1,94 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# Dependencies
+node_modules/
+/.yarn
+/.pnp.*
+.yarn/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+*.expo-shared-*
+
+# Production builds
+build/
+*.apk
+*.aab
+*.ipa
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.keystore
+
+# Metro & Development
+.metro-health-check*
+.cache/
+*.log*
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Example/boilerplate code
+app-example/
+
+# Generated native folders (keep these in git if you're using bare workflow)
+/ios
+/android
+
+# EAS
+.eas/
+
+# Coverage
+coverage/
+*.lcov
+
+# Temporary files
+.tmp/
+temp/
+
+
+
+# Documentation 
+future work.docx
+How_to_run.txt
+
+# Expo TypeScript env file 
+expo-env.dts

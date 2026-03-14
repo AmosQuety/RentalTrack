@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "558915843538",
+    "project_id": "rentaltrack-4eb0b",
+    "storage_bucket": "rentaltrack-4eb0b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:558915843538:android:4e8fe5b9c06ce9236f440b",
+        "android_client_info": {
+          "package_name": "com.rentaltrack.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDk_vwO2x-3whiw_rhMTS-XU-Pu-fIBdGA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
