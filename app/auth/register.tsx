@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
+import { useAuthHubLogin } from '../../hooks/use-authhub-login';
 import { useTheme } from '../../theme/ThemeContext';
+import { Logger } from '../../services/logger';
+import { getAuthHubConfig, registerAuthHubAccount } from '../../services/auth/authhub';
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -10,6 +13,7 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
+  const { login } = useAuthHubLogin();
   const router = useRouter();
   const { colors, typography, isDark } = useTheme();
 
@@ -30,40 +34,30 @@ export default function RegisterScreen() {
     }
 
     setLoading(true);
-    const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
     try {
-      const response = await fetch(`${apiUrl}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
-      });
+      const config = getAuthHubConfig();
+      await registerAuthHubAccount(config, email.trim().toLowerCase(), password);
 
-      const data = await response.json();
-
-      if (response.ok) {
-        await signIn(data.token);
-        Alert.alert('Success', 'Account created successfully');
-        // Navigation is handled by the guard in _layout.tsx
+      // Registration only creates the account; sign the user in via the normal
+      // OAuth/PKCE flow to actually obtain tokens.
+      const tokens = await login();
+      if (tokens) {
+        await signIn(tokens);
       } else {
-        Alert.alert('Registration Failed', data.error || 'Could not create account');
+        Alert.alert('Account Created', 'Your account was created. Please sign in.');
+        router.replace('/auth/login');
       }
     } catch (error) {
-      Logger.error('Register: Error', error);
-      
-      let message = 'Could not connect to server. Please check your connection.';
-      if (apiUrl.includes('localhost') && Platform.OS !== 'web') {
-        message = 'Connection failed: "localhost" is not accessible from a physical device. Please update EXPO_PUBLIC_API_URL in your .env to your machine\'s local IP.';
-      }
-      
-      Alert.alert('Network Error', message);
+      Logger.error('Register: AuthHub registration failed', { error: error instanceof Error ? error : new Error(String(error)) });
+      Alert.alert('Registration Failed', error instanceof Error ? error.message : 'Could not create account');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.container, { backgroundColor: colors.background }]}
     >
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -75,7 +69,7 @@ export default function RegisterScreen() {
         <View style={styles.form}>
           <Text style={[styles.label, { color: colors.text, fontFamily: typography.fonts.semibold, fontSize: typography.sizes.sm }]}>Email Address</Text>
           <TextInput
-            style={[styles.input, { 
+            style={[styles.input, {
               backgroundColor: colors.inputBackground,
               color: colors.text,
               borderColor: colors.border,
@@ -92,7 +86,7 @@ export default function RegisterScreen() {
 
           <Text style={[styles.label, { color: colors.text, fontFamily: typography.fonts.semibold, fontSize: typography.sizes.sm }]}>Password</Text>
           <TextInput
-            style={[styles.input, { 
+            style={[styles.input, {
               backgroundColor: colors.inputBackground,
               color: colors.text,
               borderColor: colors.border,
@@ -108,7 +102,7 @@ export default function RegisterScreen() {
 
           <Text style={[styles.label, { color: colors.text, fontFamily: typography.fonts.semibold, fontSize: typography.sizes.sm }]}>Confirm Password</Text>
           <TextInput
-            style={[styles.input, { 
+            style={[styles.input, {
               backgroundColor: colors.inputBackground,
               color: colors.text,
               borderColor: colors.border,
@@ -122,8 +116,8 @@ export default function RegisterScreen() {
             secureTextEntry
           />
 
-          <TouchableOpacity 
-            style={[styles.button, { backgroundColor: colors.primary }]} 
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: colors.primary }]}
             onPress={handleRegister}
             disabled={loading}
           >
@@ -140,9 +134,6 @@ export default function RegisterScreen() {
     </KeyboardAvoidingView>
   );
 }
-
-// Added for compilation
-const Logger = { error: (...args: any[]) => console.error('[Register]', ...args) };
 
 const styles = StyleSheet.create({
   container: {

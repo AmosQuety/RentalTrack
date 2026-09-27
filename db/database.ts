@@ -441,14 +441,9 @@ export const initializeDatabase = async (): Promise<void> => {
         );
       }
 
-      const settingsCount = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM settings');
-      if (settingsCount && settingsCount.count === 0) {
-        await db.runAsync(
-          `INSERT INTO settings (reminder_days_before_due, reminder_time, notification_enabled, currency, theme, auto_suspend_days, contract_reminder_days) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)`, 
-          [3, '09:00', 1, 'UGX', 'Light', 30, 60]
-        );
-      }
+      // Note: settings rows are per-user (user_id NOT NULL) and are created lazily
+      // by Database.updateSettings() / defaulted by Database.getSettings() —
+      // there is no global default row to seed here.
 
       // --- Migration: Fix room_number uniqueness (Multi-tenancy fix) ---
       const tableInfo = await db.getAllAsync<{ name: string, pk: number, unique: number }>('PRAGMA table_info(tenants)');
