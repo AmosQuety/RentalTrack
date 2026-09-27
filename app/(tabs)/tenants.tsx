@@ -1,42 +1,45 @@
-// app/(tabs)/tenants.tsx - WITH AUTO-REFRESH
+// app/(tabs)/tenants.tsx - WITH AUTO-REFRESH & CSV IMPORT/EXPORT
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { useAutoRefresh, useDatabase } from '../../hooks/use-db';
+import { Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import { useDatabase } from '../../hooks/use-db';
+import { useAuth } from '../../context/AuthContext';
 import { Tenant } from '../../libs/types';
+import { EmptyState } from '../../components/EmptyState';
+import { ImportModal } from '../../components/ImportModal';
+import { CSVService } from '../../services/CSVService';
+import { Logger } from '../../services/logger/index';
+import { useTheme } from '../../theme/ThemeContext';
+import { Card } from '../../components/ui/Card';
 
 export default function TenantsScreen() {
   const router = useRouter();
   const { isInitialized, getAllTenants } = useDatabase();
+  const { user } = useAuth();
+  const { colors, typography, isDark } = useTheme();
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [filteredTenants, setFilteredTenants] = useState<Tenant[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [sortBy, setSortBy] = useState<string>('name');
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const loadTenants = useCallback(async () => {
-    if (!isInitialized) return;
+    if (!isInitialized || !user) return;
     
     try {
       console.log('🔄 Tenants: Loading data...');
-      const allTenants = await getAllTenants();
+      const allTenants = await getAllTenants(user.user_id);
       setTenants(allTenants);
       console.log('✅ Tenants: Data loaded');
     } catch (error) {
-      console.error('Failed to load tenants:', error);
+      Logger.error('Failed to load tenants', { actionType: "TENANTS_LOAD_ERROR", error });
     }
   }, [isInitialized, getAllTenants]);
-
-  // Auto-refresh on database changes
-  const { isRefreshing, refresh } = useAutoRefresh(loadTenants, [
-    'tenant_added',
-    'tenant_updated',
-    'tenant_deleted',
-    'payment_recorded'
-  ]);
 
   // Initial load
   useEffect(() => {
@@ -106,62 +109,91 @@ export default function TenantsScreen() {
     setSortBy('name');
   };
 
+  const handleExport = async () => {
+    try {
+      setIsExporting(true);
+      await CSVService.exportTenantsCSV(tenants);
+      setShowFilterModal(false);
+    } catch (err) {
+      Alert.alert('Export Failed', 'Could not save the CSV file.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refresh = async () => {
+    setIsRefreshing(true);
+    await loadTenants();
+    setIsRefreshing(false);
+  };
+
   if (!isInitialized) {
     return (
-      <View style={styles.centerContainer}>
-        <Text>Loading...</Text>
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ color: colors.textSecondary, marginTop: 12 }}>Loading...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>All Tenants</Text>
-        <TouchableOpacity 
-          style={styles.addButton}
-          onPress={() => router.push('/add-tenant')}
-        >
-          <Ionicons name="add" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+        <Text style={[styles.title, { color: colors.text }]}>All Tenants</Text>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <TouchableOpacity 
+            style={[styles.headerIconButton, { backgroundColor: isDark ? colors.inputBackground : '#EFF6FF' }]}
+            onPress={() => setShowImportModal(true)}
+          >
+            <Ionicons name="cloud-upload-outline" size={24} color={colors.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.addButton, { backgroundColor: colors.primary }]}
+            onPress={() => router.push('/add-tenant')}
+          >
+            <Ionicons name="add" size={24} color={colors.primaryContrast} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Ionicons name="search" size={20} color="#6B7280" />
+      <View style={[styles.searchContainer, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+        <View style={[styles.searchInputContainer, { backgroundColor: isDark ? colors.inputBackground : '#F9FAFB', borderColor: isDark ? colors.border : '#E5E7EB' }]}>
+          <Ionicons name="search" size={20} color={colors.textSecondary} />
           <TextInput
-            style={styles.searchInput}
+            style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search tenants by name, room, or phone..."
+            placeholderTextColor={colors.textSecondary}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery ? (
             <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color="#6B7280" />
+              <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
           ) : null}
         </View>
         
         <TouchableOpacity 
-          style={styles.filterButton}
+          style={[styles.filterButton, { backgroundColor: isDark ? colors.inputBackground : '#F9FAFB', borderColor: isDark ? colors.border : '#E5E7EB' }]}
           onPress={() => setShowFilterModal(true)}
         >
-          <Ionicons name="filter" size={20} color="#374151" />
+          <Ionicons name="filter" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {/* Filter Summary */}
       {(searchQuery || statusFilter !== 'All' || sortBy !== 'name') && (
-        <View style={styles.filterSummary}>
-          <Text style={styles.filterSummaryText}>
+        <View style={[styles.filterSummary, { backgroundColor: isDark ? colors.warningBackground : '#EFF6FF', borderBottomColor: isDark ? colors.warning : '#DBEAFE' }]}>
+          <Text style={[styles.filterSummaryText, { color: isDark ? colors.warning : '#1E40AF' }]}>
             Showing {filteredTenants.length} of {tenants.length} tenants
             {searchQuery && ` • Search: "${searchQuery}"`}
             {statusFilter !== 'All' && ` • Status: ${statusFilter}`}
             {sortBy !== 'name' && ` • Sorted by: ${sortBy}`}
           </Text>
           <TouchableOpacity onPress={clearFilters}>
-            <Text style={styles.clearFiltersText}>Clear</Text>
+            <Text style={[styles.clearFiltersText, { color: colors.primary }]}>Clear</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -172,25 +204,25 @@ export default function TenantsScreen() {
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={refresh}
-            colors={['#007AFF']}
-            tintColor="#007AFF"
+            colors={[colors.primary]}
+            tintColor={colors.primary}
           />
         }
       >
-        <Text style={styles.pullText}>Pull down to refresh</Text>
+        <Text style={[styles.pullText, { color: colors.textSecondary }]}>Pull down to refresh</Text>
         
         {filteredTenants.map(tenant => (
           <TouchableOpacity 
             key={tenant.tenant_id}
             onPress={() => router.push(`/tenant-details?tenantId=${tenant.tenant_id}`)}
-            style={styles.tenantCard}
+            style={[styles.tenantCard, { backgroundColor: colors.card, borderColor: isDark ? colors.border : '#E5E7EB' }]}
           >
             <View style={styles.tenantInfo}>
               <View style={styles.tenantMain}>
-                <Text style={styles.tenantName}>{tenant.name}</Text>
-                <Text style={styles.tenantRoom}>Room {tenant.room_number}</Text>
+                <Text style={[styles.tenantName, { color: colors.text }]}>{tenant.name}</Text>
+                <Text style={[styles.tenantRoom, { color: colors.textSecondary }]}>Room {tenant.room_number}</Text>
                 {tenant.phone ? (
-                  <Text style={styles.tenantPhone}>{tenant.phone}</Text>
+                  <Text style={[styles.tenantPhone, { color: colors.textSecondary }]}>{tenant.phone}</Text>
                 ) : null}
               </View>
               <View 
@@ -209,23 +241,37 @@ export default function TenantsScreen() {
                 </Text>
               </View>
             </View>
-            <Text style={styles.rentText}>
+            <Text style={[styles.rentText, { color: colors.text }]}>
               Rent: {tenant.monthly_rent.toLocaleString()} UGX
             </Text>
           </TouchableOpacity>
         ))}
 
         {filteredTenants.length === 0 && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>
-              {tenants.length === 0 
-                ? "No tenants yet.\nAdd your first tenant to get started!"
-                : "No tenants match your search criteria.\nTry adjusting your filters."
+          <View style={{ marginTop: 20 }}>
+            <EmptyState
+              icon="people-outline"
+              title={tenants.length === 0 ? "No Tenants Yet" : "No Matches"}
+              subtitle={
+                tenants.length === 0
+                  ? "Add your first tenant or import from a spreadsheet."
+                  : "No tenants match your search criteria. Try adjusting your filters."
               }
-            </Text>
+              actionLabel={tenants.length === 0 ? "+ Add Tenant" : undefined}
+              onAction={tenants.length === 0 ? () => router.push('/add-tenant') : undefined}
+              secondaryLabel={tenants.length === 0 ? "Import from Spreasheet" : undefined}
+              onSecondaryAction={tenants.length === 0 ? () => setShowImportModal(true) : undefined}
+            />
           </View>
         )}
       </ScrollView>
+
+      {/* Import Modal */}
+      <ImportModal
+        visible={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImportComplete={loadTenants}
+      />
 
       {/* Filter Modal - Same as before */}
       <Modal
@@ -234,20 +280,20 @@ export default function TenantsScreen() {
         presentationStyle="pageSheet"
         onRequestClose={() => setShowFilterModal(false)}
       >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Filter & Sort</Text>
+        <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Filter & Sort</Text>
             <TouchableOpacity 
               onPress={() => setShowFilterModal(false)}
-              style={styles.closeButton}
+              style={[styles.closeButton, { backgroundColor: isDark ? colors.inputBackground : '#F3F4F6' }]}
             >
-              <Ionicons name="close" size={24} color="#374151" />
+              <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
           <ScrollView style={styles.modalContent}>
             <View style={styles.filterSection}>
-              <Text style={styles.filterSectionTitle}>Status</Text>
+              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>Status</Text>
               <View style={styles.filterOptions}>
                 {['All', 'Paid', 'Due Soon', 'Overdue'].map(status => (
                   <TouchableOpacity
@@ -255,12 +301,14 @@ export default function TenantsScreen() {
                     onPress={() => setStatusFilter(status)}
                     style={[
                       styles.filterOption,
-                      statusFilter === status && styles.filterOptionSelected
+                      { backgroundColor: isDark ? colors.inputBackground : '#F3F4F6', borderColor: isDark ? colors.border : '#E5E7EB' },
+                      statusFilter === status && { backgroundColor: colors.primary, borderColor: colors.primary }
                     ]}
                   >
                     <Text style={[
                       styles.filterOptionText,
-                      statusFilter === status && styles.filterOptionTextSelected
+                      { color: isDark ? colors.text : '#374151' },
+                      statusFilter === status && { color: colors.primaryContrast }
                     ]}>
                       {status}
                     </Text>
@@ -270,7 +318,7 @@ export default function TenantsScreen() {
             </View>
 
             <View style={styles.filterSection}>
-              <Text style={styles.filterSectionTitle}>Sort By</Text>
+              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>Sort By</Text>
               <View style={styles.filterOptions}>
                 {[
                   { value: 'name', label: 'Name' },
@@ -283,12 +331,14 @@ export default function TenantsScreen() {
                     onPress={() => setSortBy(option.value)}
                     style={[
                       styles.filterOption,
-                      sortBy === option.value && styles.filterOptionSelected
+                      { backgroundColor: isDark ? colors.inputBackground : '#F3F4F6', borderColor: isDark ? colors.border : '#E5E7EB' },
+                      sortBy === option.value && { backgroundColor: colors.primary, borderColor: colors.primary }
                     ]}
                   >
                     <Text style={[
                       styles.filterOptionText,
-                      sortBy === option.value && styles.filterOptionTextSelected
+                      { color: isDark ? colors.text : '#374151' },
+                      sortBy === option.value && { color: colors.primaryContrast }
                     ]}>
                       {option.label}
                     </Text>
@@ -298,19 +348,24 @@ export default function TenantsScreen() {
             </View>
           </ScrollView>
 
-          <View style={styles.modalFooter}>
+          <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
             <TouchableOpacity 
-              onPress={clearFilters}
-              style={styles.clearAllButton}
+              onPress={handleExport}
+              style={[styles.exportButton, { backgroundColor: isDark ? colors.inputBackground : '#F3F4F6', borderColor: isDark ? colors.border : '#E5E7EB' }]}
+              disabled={isExporting}
             >
-              <Text style={styles.clearAllButtonText}>Clear All</Text>
+              <Ionicons name="download-outline" size={20} color={colors.textSecondary} style={{ marginRight: 6 }} />
+              <Text style={[styles.exportButtonText, { color: colors.text }]}>{isExporting ? 'Exporting...' : 'Export CSV'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              onPress={() => setShowFilterModal(false)}
-              style={styles.applyButton}
-            >
-              <Text style={styles.applyButtonText}>Apply Filters</Text>
-            </TouchableOpacity>
+
+            <View style={{ flex: 1, flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity onPress={clearFilters} style={[styles.clearAllButton, { backgroundColor: isDark ? colors.inputBackground : '#F3F4F6' }]}>
+                <Text style={[styles.clearAllButtonText, { color: colors.text }]}>Clear</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowFilterModal(false)} style={[styles.applyButton, { backgroundColor: colors.primary }]}>
+                <Text style={[styles.applyButtonText, { color: colors.primaryContrast }]}>Apply</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -347,6 +402,14 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EFF6FF',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -461,19 +524,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontWeight: '500',
   },
-  emptyState: {
-    backgroundColor: '#F3F4F6',
-    padding: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
   modalContainer: {
     flex: 1,
     backgroundColor: '#FFFFFF',
@@ -533,15 +583,30 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   modalFooter: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
     gap: 12,
   },
+  exportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  exportButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
+  },
   clearAllButton: {
     flex: 1,
-    padding: 16,
+    padding: 14,
     borderRadius: 8,
     backgroundColor: '#F3F4F6',
     alignItems: 'center',

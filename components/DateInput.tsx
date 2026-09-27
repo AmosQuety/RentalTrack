@@ -1,21 +1,19 @@
-// components/DateInput.tsx - UPDATED WITH EXPO DATETIMEPICKER
+// components/DateInput.tsx
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
-
-
-
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Keyboard,
   Modal,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { DateParser, ParseResult } from '../utils/dateParser';
+import { useTheme } from '../theme/ThemeContext';
+import { InputField } from './ui/InputField';
 
 interface DateInputProps {
   label: string;
@@ -38,6 +36,8 @@ export const DateInput: React.FC<DateInputProps> = ({
   minDate,
   error: externalError,
 }) => {
+  const { colors, typography } = useTheme();
+  
   // State
   const [displayValue, setDisplayValue] = useState('');
   const [isPickerVisible, setIsPickerVisible] = useState(false);
@@ -45,13 +45,9 @@ export const DateInput: React.FC<DateInputProps> = ({
   const [isTouched, setIsTouched] = useState(false);
   const [tempDate, setTempDate] = useState(new Date());
 
-  // Refs
-  const inputRef = useRef<TextInput>(null);
-
   // Derived state
   const showError = isTouched && (internalError || externalError);
   const errorMessage = internalError || externalError;
-
 
   const today = new Date();
   const todayDisplay = `${today.getDate().toString().padStart(2, '0')}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getFullYear()}`;
@@ -78,13 +74,6 @@ export const DateInput: React.FC<DateInputProps> = ({
       onChange('');
       return;
     }
-
-    // Replace with only manual validation on blur
-  const handleBlur = () => {
-    if (displayValue.trim()) {
-      handleTextParse(displayValue);
-    }
-  };
 
     const result: ParseResult = DateParser.parseUserInput(text);
     
@@ -154,54 +143,31 @@ export const DateInput: React.FC<DateInputProps> = ({
     setIsTouched(true);
   };
 
-  // Render Methods
-  const renderInputContainer = () => (
-    <View style={[
-      styles.inputContainer,
-      showError && styles.inputContainerError,
-      isTouched && !showError && value && styles.inputContainerSuccess
-    ]}>
-      <TextInput
-        ref={inputRef}
-        style={styles.textInput}
-        value={displayValue}
-        onChangeText={handleTextChange}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        placeholder={todayDisplay}
-        placeholderTextColor="#9CA3AF"
-        keyboardType="numbers-and-punctuation"
-        returnKeyType="done"
-      />
-      {renderActionButtons()}
-    </View>
-  );
-
   const renderActionButtons = () => (
     <View style={styles.buttonContainer}>
       {displayValue ? (
         <TouchableOpacity onPress={clearDate} style={styles.clearButton}>
-          <Ionicons name="close-circle" size={20} color="#6B7280" />
+          <Ionicons name="close-circle" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
       ) : null}
       
       <TouchableOpacity onPress={showDatePicker} style={styles.calendarButton}>
-        <Ionicons name="calendar-outline" size={20} color="#6B7280" />
+        <Ionicons name="calendar-outline" size={20} color={colors.primary} />
       </TouchableOpacity>
     </View>
   );
 
   const renderQuickSelectButtons = () => (
     <View style={styles.quickSelectContainer}>
-      <Text style={styles.quickSelectLabel}>Quick select:</Text>
-      <TouchableOpacity onPress={() => handleQuickSelect(-1)} style={styles.quickButton}>
-        <Text style={styles.quickButtonText}>Yesterday</Text>
+      <Text style={[styles.quickSelectLabel, { color: colors.textSecondary }]}>Quick select:</Text>
+      <TouchableOpacity onPress={() => handleQuickSelect(-1)} style={[styles.quickButton, { backgroundColor: colors.inputBackground }]}>
+        <Text style={[styles.quickButtonText, { color: colors.text }]}>Yesterday</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => handleQuickSelect(0)} style={styles.quickButton}>
-        <Text style={styles.quickButtonText}>Today</Text>
+      <TouchableOpacity onPress={() => handleQuickSelect(0)} style={[styles.quickButton, { backgroundColor: colors.inputBackground }]}>
+        <Text style={[styles.quickButtonText, { color: colors.text }]}>Today</Text>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => handleQuickSelect(1)} style={styles.quickButton}>
-        <Text style={styles.quickButtonText}>Tomorrow</Text>
+      <TouchableOpacity onPress={() => handleQuickSelect(1)} style={[styles.quickButton, { backgroundColor: colors.inputBackground }]}>
+        <Text style={[styles.quickButtonText, { color: colors.text }]}>Tomorrow</Text>
       </TouchableOpacity>
     </View>
   );
@@ -210,8 +176,8 @@ export const DateInput: React.FC<DateInputProps> = ({
     if (showError) {
       return (
         <View style={styles.errorContainer}>
-          <Ionicons name="warning-outline" size={16} color="#DC2626" />
-          <Text style={styles.errorText}>{errorMessage}</Text>
+          <Ionicons name="warning-outline" size={16} color={colors.danger} />
+          <Text style={[styles.errorText, { color: colors.danger }]}>{errorMessage}</Text>
         </View>
       );
     }
@@ -219,8 +185,8 @@ export const DateInput: React.FC<DateInputProps> = ({
     if (value) {
       return (
         <View style={styles.successContainer}>
-          <Ionicons name="checkmark-circle-outline" size={16} color="#10B981" />
-          <Text style={styles.successText}>
+          <Ionicons name="checkmark-circle-outline" size={16} color={colors.success} />
+          <Text style={[styles.successText, { color: colors.success }]}>
             {new Date(value).toLocaleDateString('en-GB', { 
               weekday: 'long',
               year: 'numeric',
@@ -246,9 +212,9 @@ export const DateInput: React.FC<DateInputProps> = ({
         onRequestClose={hideDatePicker}
       >
         <TouchableWithoutFeedback onPress={hideDatePicker}>
-          <View style={styles.modalOverlay}>
+          <View style={[styles.modalOverlay, { backgroundColor: colors.overlay }]}>
             <TouchableWithoutFeedback>
-              <View style={styles.pickerContainer}>
+              <View style={[styles.pickerContainer, { backgroundColor: colors.card }]}>
                 {renderPickerHeader()}
                 {renderExpoDateTimePicker()}
                 {renderPickerActions()}
@@ -261,10 +227,10 @@ export const DateInput: React.FC<DateInputProps> = ({
   };
 
   const renderPickerHeader = () => (
-    <View style={styles.pickerHeader}>
-      <Text style={styles.pickerTitle}>Select {label}</Text>
+    <View style={[styles.pickerHeader, { borderBottomColor: colors.border }]}>
+      <Text style={[styles.pickerTitle, { color: colors.text }]}>Select {label}</Text>
       <TouchableOpacity onPress={hideDatePicker}>
-        <Ionicons name="close" size={24} color="#374151" />
+        <Ionicons name="close" size={24} color={colors.textSecondary} />
       </TouchableOpacity>
     </View>
   );
@@ -293,26 +259,34 @@ export const DateInput: React.FC<DateInputProps> = ({
           const today = new Date();
           handlePickerConfirm(today);
         }}
-        style={styles.todayButton}
+        style={[styles.todayButton, { backgroundColor: colors.primary }]}
       >
-        <Text style={styles.todayButtonText}>Today</Text>
+        <Text style={[styles.todayButtonText, { color: colors.primaryContrast }]}>Today</Text>
       </TouchableOpacity>
       <TouchableOpacity 
         onPress={hideDatePicker}
-        style={styles.cancelButton}
+        style={[styles.cancelButton, { backgroundColor: colors.inputBackground }]}
       >
-        <Text style={styles.cancelButtonText}>Cancel</Text>
+        <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancel</Text>
       </TouchableOpacity>
     </View>
   );
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>
-        {label} {required && <Text style={styles.required}>*</Text>}
-      </Text>
-
-      {renderInputContainer()}
+      <InputField
+        label={`${label} ${required ? '*' : ''}`}
+        value={displayValue}
+        onChangeText={handleTextChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        placeholder={todayDisplay}
+        keyboardType="numbers-and-punctuation"
+        returnKeyType="done"
+        rightIcon={renderActionButtons()}
+        error={showError ? (errorMessage as string) : undefined}
+      />
+      
       {renderQuickSelectButtons()}
       {renderValidationFeedback()}
       {renderDatePickerModal()}
@@ -320,40 +294,9 @@ export const DateInput: React.FC<DateInputProps> = ({
   );
 };
 
-// Styles
 const styles = StyleSheet.create({
   container: {
     marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  required: {
-    color: '#EF4444',
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
-  },
-  inputContainerError: {
-    borderColor: '#DC2626',
-  },
-  inputContainerSuccess: {
-    borderColor: '#10B981',
-  },
-  textInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1F2937',
-    paddingVertical: 12,
   },
   buttonContainer: {
     flexDirection: 'row',
@@ -369,25 +312,23 @@ const styles = StyleSheet.create({
   quickSelectContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: -8,
+    marginBottom: 8,
     flexWrap: 'wrap',
   },
   quickSelectLabel: {
     fontSize: 12,
-    color: '#6B7280',
     marginRight: 8,
   },
   quickButton: {
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: '#F3F4F6',
     borderRadius: 6,
     marginRight: 6,
     marginBottom: 4,
   },
   quickButtonText: {
     fontSize: 12,
-    color: '#374151',
   },
   errorContainer: {
     flexDirection: 'row',
@@ -396,7 +337,6 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 12,
-    color: '#DC2626',
     marginLeft: 4,
   },
   successContainer: {
@@ -406,16 +346,13 @@ const styles = StyleSheet.create({
   },
   successText: {
     fontSize: 12,
-    color: '#10B981',
     marginLeft: 4,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
   pickerContainer: {
-    backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     paddingBottom: 20,
@@ -427,12 +364,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
   },
   pickerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1F2937',
   },
   datePickerContainer: {
     alignItems: 'center',
@@ -451,21 +386,17 @@ const styles = StyleSheet.create({
   todayButton: {
     paddingVertical: 8,
     paddingHorizontal: 16,
-    backgroundColor: '#3B82F6',
     borderRadius: 8,
   },
   todayButtonText: {
-    color: '#FFFFFF',
     fontWeight: '500',
   },
   cancelButton: {
     paddingVertical: 8,
     paddingHorizontal: 16,
-    backgroundColor: '#F3F4F6',
     borderRadius: 8,
   },
   cancelButtonText: {
-    color: '#374151',
     fontWeight: '500',
   },
 });

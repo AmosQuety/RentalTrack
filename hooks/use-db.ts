@@ -1,39 +1,12 @@
-// hooks/use-db.ts - COMPLETE VERSION
 import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { Database, initializeDatabase } from '../db/database';
+import { Payment, Settings as SettingsType, Tenant } from '../libs/types';
 import { NotificationService } from '../services/notifications';
+import { Logger } from '../services/logger/index';
 
-type DatabaseEventType = 'tenant_added' | 'tenant_updated' | 'tenant_deleted' | 'payment_recorded' | 'settings_updated';
-type DatabaseEventListener = () => void;
-
-class DatabaseEventEmitter {
-  private listeners: Map<DatabaseEventType, Set<DatabaseEventListener>> = new Map();
-
-  subscribe(event: DatabaseEventType, listener: DatabaseEventListener): () => void {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set());
-    }
-    this.listeners.get(event)!.add(listener);
-
-    return () => {
-      this.listeners.get(event)?.delete(listener);
-    };
-  }
-
-  emit(event: DatabaseEventType): void {
-    console.log(`📢 Database event: ${event}`);
-    this.listeners.get(event)?.forEach(listener => {
-      try {
-        listener();
-      } catch (error) {
-        console.error('Error in database event listener:', error);
-      }
-    });
-  }
-}
-
-export const dbEvents = new DatabaseEventEmitter();
+// Removed global event emitter to fix render loops
+// UI will now rely purely on useFocusEffect for data refreshing.
 
 export const useDatabase = () => {
   const [isInitialized, setIsInitialized] = useState(false);
@@ -48,7 +21,6 @@ export const useDatabase = () => {
   useEffect(() => {
     const initApp = async () => {
       try {
-        console.log('🚀 Starting app initialization...');
         
         // CRITICAL: Add timeout to prevent infinite hanging
         const initTimeout = new Promise<never>((_, reject) => 
@@ -61,44 +33,45 @@ export const useDatabase = () => {
         ]);
         
         console.log('✅ Database initialized');
-
-        // Initialize notifications (non-blocking)
-        try {
-          await NotificationService.initialize();
-          console.log('✅ Notifications initialized');
-        } catch (notifError) {
-          console.warn('⚠️ Notification initialization failed (non-critical):', notifError);
-        }
-
-        // Run system heartbeat (non-blocking)
-        try {
-          const results = await Database.runSystemHeartbeat();
-          setHeartbeatResults(results);
-          console.log('✅ System heartbeat completed');
-        } catch (heartbeatError) {
-          console.warn('⚠️ Heartbeat failed (non-critical):', heartbeatError);
-        }
-        
-        // Update tenant statuses (non-blocking)
-        try {
-          await Database.updateAllTenantStatuses();
-          console.log('✅ Tenant statuses updated');
-        } catch (statusError) {
-          console.warn('⚠️ Status update failed (non-critical):', statusError);
-        }
-
-        // Check pending reminders (non-blocking)
-        try {
-          await NotificationService.checkPendingReminders();
-          console.log('✅ Reminders checked');
-        } catch (reminderError) {
-          console.warn('⚠️ Reminder check failed (non-critical):', reminderError);
-        }
-
         setIsInitialized(true);
-        console.log('🎉 App initialization complete');
+
+        // Defer non-critical services by 500ms to allow UI to render first
+        setTimeout(async () => {
+          // Initialize notifications
+          try {
+            await NotificationService.initialize();
+          } catch (notifError) {
+            Logger.warn('Notification initialization failed', { error: notifError });
+          }
+
+          // Run system heartbeat
+          try {
+            // Note: userId will be updated when called from authenticated screens
+            await Database.runSystemHeartbeat('SYSTEM_INIT');
+          } catch (heartbeatError) {
+            Logger.warn('Heartbeat failed', { error: heartbeatError });
+          }
+          
+          // Update tenant statuses
+          try {
+            await Database.updateAllTenantStatuses('SYSTEM_INIT');
+          } catch (statusError) {
+            Logger.warn('Status update failed', { error: statusError });
+          }
+
+          // Check pending reminders
+          try {
+            await NotificationService.checkPendingReminders();
+          } catch (reminderError) {
+            Logger.warn('Reminder check failed', { error: reminderError });
+          }
+
+          Logger.info('Background services initialized', { actionType: 'APP_INIT_BG_COMPLETE' });
+        }, 500);
+
+        Logger.info('App initialization complete', { actionType: 'APP_INIT_SUCCESS' });
       } catch (err) {
-        console.error('❌ CRITICAL: App initialization failed:', err);
+        Logger.error('CRITICAL: App initialization failed', { error: err });
         const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
         setError(errorMessage);
         
@@ -135,59 +108,51 @@ export const useDatabase = () => {
     initApp();
   }, []); // Only run once on mount
 
-  const runHeartbeat = useCallback(async (): Promise<{
+  const runHeartbeat = useCallback(async (userId: string): Promise<{
     statusUpdates: number;
     suspensionAlerts: string[];
     contractAlerts: string[];
   }> => {
     try {
-      const results = await Database.runSystemHeartbeat();
+      const results = await Database.runSystemHeartbeat(userId);
       setHeartbeatResults(results);
       return results;
     } catch (error) {
-      console.error('Failed to run heartbeat:', error);
+      Logger.error('Failed to run heartbeat', { error });
       throw error;
     }
   }, []);
 
-  const addTenant = useCallback(async (tenant: any) => {
-    const result = await Database.addTenant(tenant);
-    dbEvents.emit('tenant_added');
+  const addTenant = useCallback(async (userId: string, tenant: Parameters<typeof Database.addTenant>[1]) => {
+    const result = await Database.addTenant(userId, tenant);
     return result;
   }, []);
 
-  const updateTenant = useCallback(async (tenantId: number, updates: any) => {
-    await Database.updateTenant(tenantId, updates);
-    dbEvents.emit('tenant_updated');
+  const updateTenant = useCallback(async (tenantId: number, userId: string, updates: Parameters<typeof Database.updateTenant>[2]) => {
+    await Database.updateTenant(tenantId, userId, updates);
   }, []);
 
-  const deleteTenant = useCallback(async (tenantId: number) => {
-    await Database.deleteTenant(tenantId);
-    dbEvents.emit('tenant_deleted');
-    // ADD THESE ADDITIONAL EVENTS
-    dbEvents.emit('payment_recorded'); // Payments are affected when tenant is deleted
-    dbEvents.emit('tenant_updated'); // Other tenants' stats might change
+  const deleteTenant = useCallback(async (tenantId: number, userId: string) => {
+    await Database.deleteTenant(tenantId, userId);
   }, []);
 
-  const recordPayment = useCallback(async (payment: any) => {
-    const result = await Database.recordPayment(payment);
-    dbEvents.emit('payment_recorded');
+  const recordPayment = useCallback(async (userId: string, payment: Omit<Parameters<typeof Database.recordPayment>[1], 'tenantId'> & { tenantId: number }) => {
+    const result = await Database.recordPayment(userId, { ...payment, tenantId: payment.tenantId });
 
     if (result.shouldAlertPartial && result.alertMessage) {
-      console.log('🔔 Partial Payment Alert:', result.alertMessage);
+      Logger.info('Partial Payment Alert', { alertMessage: result.alertMessage });
     }
     
     return result.paymentId;
   }, []);
 
-  const cancelPayment = useCallback(async (paymentId: number, reason: string) => {
-    await Database.cancelPayment(paymentId, reason);
-    dbEvents.emit('payment_recorded');
+  const cancelPayment = useCallback(async (paymentId: number, userId: string, reason: string) => {
+    await Database.cancelPayment(paymentId, userId, reason);
   }, []);
 
-  const updateSettings = useCallback(async (settings: any) => {
-    await Database.updateSettings(settings);
-    dbEvents.emit('settings_updated');
+  const getSettings = useCallback(async (userId: string) => Database.getSettings(userId), []);
+  const updateSettings = useCallback(async (userId: string, settings: Partial<SettingsType>) => {
+    await Database.updateSettings(userId, settings);
   }, []);
 
   return {
@@ -197,8 +162,9 @@ export const useDatabase = () => {
     initAttempts,
 
     // Core methods
-    getAllTenants: Database.getAllTenants,
-    getTenant: Database.getTenant,
+    getAllTenants: useCallback(async (userId: string) => Database.getAllTenants(userId), []),
+    getTenant: useCallback(async (tenantId: number, userId: string) => Database.getTenant(tenantId, userId), []),
+    getPaymentById: useCallback(async (paymentId: number, userId: string) => Database.getPaymentById(paymentId, userId), []),
     addTenant,
     updateTenant,
     deleteTenant,
@@ -206,73 +172,40 @@ export const useDatabase = () => {
     // Payment methods
     recordPayment,
     cancelPayment,
-    getPaymentHistory: Database.getPaymentHistory,
-    getPaymentStats: Database.getPaymentStats, // ✅ NOW EXPORTED
-    getMonthlyTrend: Database.getMonthlyTrend, // ✅ NOW EXPORTED
-    getDashboardStats: Database.getDashboardStats,
-    getTenantStats: Database.getTenantStats, // ✅ NOW EXPORTED
-    getTenantWithDetails: Database.getTenantWithDetails,
-    getRecentPayments: Database.getRecentPayments,
+    getPaymentHistory: useCallback(async (tenantId: number, userId: string) => Database.getPaymentHistory(tenantId, userId), []),
+    getPaymentStats: useCallback(async (userId: string) => Database.getPaymentStats(userId), []),
+    getMonthlyTrend: useCallback(async (userId: string) => Database.getMonthlyTrend(userId), []),
+    getDashboardStats: useCallback(async (userId: string) => Database.getDashboardStats(userId), []),
+    getTenantStats: useCallback(async (tenantId: number, userId: string) => Database.getTenantStats(tenantId, userId), []),
+    getTenantWithDetails: useCallback(async (tenantId: number, userId: string) => Database.getTenantWithDetails(tenantId, userId), []),
+    getRecentPayments: useCallback(async (userId: string, limit?: number) => Database.getRecentPayments(userId, limit), []),
 
     // System methods
     runHeartbeat,
-    updateAllTenantStatuses: Database.updateAllTenantStatuses,
-    resetCreditBalance: Database.resetCreditBalance, // ✅ NOW EXPORTED
-     recalculatePaymentStats: Database.recalculatePaymentStats, // ✅ ADD THIS LINE
+    updateAllTenantStatuses: useCallback(async (userId: string) => Database.updateAllTenantStatuses(userId), []),
+    resetCreditBalance: useCallback(async (tenantId: number, userId: string) => Database.resetCreditBalance(tenantId, userId), []),
+    recalculatePaymentStats: useCallback(async () => Database.recalculatePaymentStats(), []),
+    getCollectionRate: useCallback(async (userId: string) => Database.getCollectionRate(userId), []),
+    getLedgerSummary: useCallback(async (userId: string, fromDate: string, toDate: string) => Database.getLedgerSummary(fromDate, toDate, userId), []),
 
     // Reminder methods
-    getUpcomingReminders: Database.getUpcomingReminders, // ✅ NOW EXPORTED
-    getReminders: Database.getReminders,
+    getUpcomingReminders: useCallback(async (userId: string, daysAhead?: number) => Database.getUpcomingReminders(userId, daysAhead), []),
+    getReminders: useCallback(async (userId: string, tenantId?: number) => Database.getReminders(userId, tenantId), []),
     
     // Settings methods
-    getSettings: Database.getSettings,
+    getSettings,
     updateSettings,
 
     // Search & Filter
-    searchTenants: Database.searchTenants,
-    getOverdueTenants: Database.getOverdueTenants,
-    getTenantsDueSoon: Database.getTenantsDueSoon,
-    getPaidTenants: Database.getPaidTenants,
+    searchTenants: useCallback(async (userId: string, query: string) => Database.searchTenants(userId, query), []),
+    getOverdueTenants: useCallback(async (userId: string) => Database.getOverdueTenants(userId), []),
+    getTenantsDueSoon: useCallback(async (userId: string) => Database.getTenantsDueSoon(userId), []),
+    getPaidTenants: useCallback(async (userId: string) => Database.getPaidTenants(userId), []),
     
     // Utility
-    getTotalMonthlyRent: Database.getTotalMonthlyRent,
-    getTotalCreditBalance: Database.getTotalCreditBalance,
+    getTotalMonthlyRent: useCallback(async (userId: string) => Database.getTotalMonthlyRent(userId), []),
+    getTotalCreditBalance: useCallback(async (userId: string) => Database.getTotalCreditBalance(userId), []),
   };
 };
 
-export const useAutoRefresh = (
-  loadDataFn: () => Promise<void>,
-  events: DatabaseEventType[]
-) => {
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  useEffect(() => {
-    const unsubscribers = events.map(event => 
-      dbEvents.subscribe(event, async () => {
-        console.log(`🔄 Auto-refreshing due to: ${event}`);
-        try {
-          await loadDataFn();
-        } catch (error) {
-          console.error('Auto-refresh failed:', error);
-        }
-      })
-    );
-
-    return () => {
-      unsubscribers.forEach(unsub => unsub());
-    };
-  }, [loadDataFn, events]);
-
-  const refresh = useCallback(async () => {
-    setIsRefreshing(true);
-    try {
-      await loadDataFn();
-    } catch (error) {
-      console.error('Manual refresh failed:', error);
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [loadDataFn]);
-
-  return { isRefreshing, refresh };
-};
+// useAutoRefresh removed to fix render loops. Screens should use useFocusEffect instead.

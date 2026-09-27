@@ -13,6 +13,10 @@ export interface Tenant {
   notes: string;
   created_at: string;
   updated_at: string;
+  user_id: string;
+  version: number;
+  is_dirty: number;
+  deleted_at: string | null;
 }
 
 export interface Payment {
@@ -25,18 +29,29 @@ export interface Payment {
   payment_method: string;
   notes: string;
   created_at: string;
+  receipt_url?: string | null;
+  rent_amount_at_payment?: number;
+  rent_cycle_at_payment?: string;
+  user_id: string;
+  version: number;
+  is_dirty: number;
+  deleted_at: string | null;
 }
 
 export interface Settings {
   setting_id: number;
   reminder_days_before_due: number;
   reminder_time: string;
-  notification_enabled: boolean;
+  notification_enabled: number; // SQLite INTEGER: 1 = enabled, 0 = disabled
   currency: string;
   theme: string;
-  auto_suspend_days: number; // NEW: Days after due date to auto-suspend
-  contract_reminder_days: number; // NEW: Days before contract end to remind
+  auto_suspend_days: number;
+  contract_reminder_days: number;
   created_at: string;
+  updated_at?: string;
+  user_id: string;
+  is_dirty?: number;
+  version?: number;
 }
 
 export interface Reminder {
@@ -49,6 +64,10 @@ export interface Reminder {
   created_at: string;
   name?: string;
   room_number?: string;
+  user_id: string;
+  version: number;
+  is_dirty: number;
+  deleted_at: string | null;
 }
 
 // NEW: Analytics types
@@ -61,4 +80,3 @@ export interface AnalyticsData {
   expiringContracts: number;
   autoSuspensionAlerts: string[];
 }
-

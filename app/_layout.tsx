@@ -1,6 +1,5 @@
-// app/_layout.tsx - PRODUCTION-SAFE VERSION
+// app/_layout.tsx — Phase 6 Production-Safe Version
 import { useDatabase } from '@/hooks/use-db';
-import { Payment } from '@/libs/types';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Stack, useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -10,9 +9,134 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, AppState, AppStateStatus, Platform, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { RepositoriesProvider } from '../repositories/RepositoryProvider';
+import { Logger } from '../services/logger/index';
+import { captureException, initErrorMonitoring } from '../services/logger/monitoring';
 import { NotificationService } from '../services/notifications';
+import { SmartScheduler } from '../services/notifications/SmartScheduler';
+import { usePushToken } from '../services/notifications/usePushToken';
+import { ThemeProvider } from '../theme/ThemeContext';
+import { AuthProvider, useAuth } from '../context/AuthContext';
+import { useSegments } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync();
+
+function RootLayoutNav() {
+  const { user, isLoading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+  const { isInitialized } = useDatabase();
+
+  useEffect(() => {
+    if (isLoading || !isInitialized) return;
+
+    const inAuthGroup = segments[0] === 'auth';
+
+    if (!user && !inAuthGroup) {
+      // Redirect to login if not authenticated
+      router.replace('/auth/login');
+    } else if (user && inAuthGroup) {
+      // Redirect to main app if already authenticated
+      router.replace('/(tabs)');
+    }
+  }, [user, segments, isLoading, isInitialized]);
+
+  // ─── Notification response handler ────────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    
+    const remove = NotificationService.setupNotificationResponseHandler(async (response) => {
+      const { actionIdentifier, notification } = response;
+      const data = notification.request.content.data as {
+        tenantId?: number | string;
+        tenantName?: string;
+        dueDate?: string;
+        amount?: number | string;
+      };
+      const { tenantId, tenantName, dueDate, amount } = data;
+
+      Logger.info('Notification action received', {
+        actionType: 'NOTIFICATION_ACTION',
+        action: actionIdentifier,
+        tenantName,
+        tenantId: Number(tenantId),
+      });
+
+      try {
+        switch (actionIdentifier) {
+          case 'MARK_PAID':
+            router.push({
+              pathname: '/record-payment',
+              params: {
+                tenantId: String(tenantId),
+                prefillAmount: String(amount ?? ''),
+              },
+            });
+            break;
+
+          case 'SNOOZE_DAY':
+            await NotificationService.snoozeReminder(Number(tenantId), user.user_id, dueDate ?? '', 1);
+            Alert.alert(
+              '✅ Reminder Snoozed',
+              `Reminder for ${tenantName} snoozed for 1 day.`,
+              [{ text: 'OK' }]
+            );
+            break;
+
+          default:
+            router.push(`/tenant-details?tenantId=${tenantId}`);
+            break;
+        }
+      } catch (error) {
+        captureException(
+          error instanceof Error ? error : new Error(String(error)),
+          { actionType: 'NOTIFICATION_ACTION_FAILED', action: actionIdentifier }
+        );
+        Alert.alert('Error', 'Failed to process notification action. Please try again.', [
+          { text: 'OK' },
+        ]);
+      }
+    });
+
+    return remove;
+  }, [router, user]);
+
+  // ─── Foreground notification handler ──────────────────────────────────
+  useEffect(() => {
+    return NotificationService.setupForegroundNotificationHandler((notification) => {
+      Logger.info('Notification received in foreground', {
+        actionType: 'NOTIFICATION_FOREGROUND',
+        title: notification.request.content.title ?? '(no title)',
+      });
+    });
+  }, []);
+
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="auth" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="tenant-details"
+        options={{ title: 'Tenant Details', headerShown: true, headerBackTitle: 'Back' }}
+      />
+      <Stack.Screen
+        name="record-payment"
+        options={{ title: 'Record Payment', headerShown: true, headerBackTitle: 'Back' }}
+      />
+      <Stack.Screen
+        name="add-tenant"
+        options={{ title: 'Add Tenant', headerShown: false, headerBackTitle: 'Back' }}
+      />
+      <Stack.Screen
+        name="edit-tenant"
+        options={{ title: 'Edit Tenant', headerShown: true, headerBackTitle: 'Back' }}
+      />
+    </Stack>
+  );
+}
+
+// Initialise error monitoring as early as possible (before any component mounts)
+initErrorMonitoring();
 
 export default function RootLayout() {
   const router = useRouter();
@@ -20,308 +144,151 @@ export default function RootLayout() {
   const [appIsReady, setAppIsReady] = useState(false);
   const [criticalError, setCriticalError] = useState<string | null>(null);
 
-  const { 
-  isInitialized,
-  getDashboardStats, 
-  getRecentPayments,
-  recalculatePaymentStats // ADD THIS
-} = useDatabase();
+  const { isInitialized } = useDatabase();
 
-const loadDashboardData = useCallback(async () => {
-  if (!isInitialized) return;
+  // Register device push token with backend
+  usePushToken();
 
-  try {
-    console.log('🔄 Dashboard: Loading data...');
-    
-    // Force recalculation
-    await recalculatePaymentStats();
-    
-    const [dashboardStats, recentPayments] = await Promise.all([
-      getDashboardStats(),
-      getRecentPayments()
-    ]);
-    
-    setStats(dashboardStats);
-    setPayments(recentPayments);
-    setLastUpdated(new Date());
-  } catch (error) {
-    console.error('Failed to load dashboard data:', error);
-  }
-}, [isInitialized, getDashboardStats, getRecentPayments, recalculatePaymentStats]);
+  // ─── Global unhandled-promise rejection logger ──────────────────────────
+  useEffect(() => {
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const err = event.reason instanceof Error
+        ? event.reason
+        : new Error(String(event.reason));
+      captureException(err, { actionType: 'UNHANDLED_PROMISE_REJECTION' });
+    };
 
+    if (typeof globalThis !== 'undefined') {
+      (globalThis as unknown as Window).addEventListener?.('unhandledrejection', handleUnhandledRejection);
+    }
+
+    return () => {
+      if (typeof globalThis !== 'undefined') {
+        (globalThis as unknown as Window).removeEventListener?.('unhandledrejection', handleUnhandledRejection);
+      }
+    };
+  }, []);
+
+  // ─── OTA Update check ──────────────────────────────────────────────────
   const checkForUpdates = async (retryCount = 0): Promise<void> => {
     if (__DEV__ || isUpdateChecking) return;
-
     setIsUpdateChecking(true);
 
     try {
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Update check timeout')), 10000)
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Update check timeout')), 10_000)
       );
-
-      const updatePromise = Updates.checkForUpdateAsync();
-      const update = await Promise.race([updatePromise, timeoutPromise]);
+      const update = await Promise.race([Updates.checkForUpdateAsync(), timeoutPromise]);
 
       if (update.isAvailable) {
-        console.log('📦 Update available, downloading...');
-        
+        Logger.info('OTA update available — downloading', { actionType: 'OTA_UPDATE_AVAILABLE' });
         try {
           await Updates.fetchUpdateAsync();
-          console.log('✅ Update downloaded successfully');
-          
+          Logger.info('OTA update downloaded', { actionType: 'OTA_UPDATE_DOWNLOADED' });
           Alert.alert(
             'Update Ready',
-            'A new version has been downloaded. Restart now to enjoy the latest features?',
+            'A new version has been downloaded. Restart now?',
             [
-              {
-                text: 'Later',
-                style: 'cancel',
-                onPress: () => {
-                  console.log('Update deferred by user');
-                },
-              },
+              { text: 'Later', style: 'cancel' },
               {
                 text: 'Restart Now',
                 style: 'default',
-                onPress: () => {
-                  Updates.reloadAsync().catch(error => {
-                    console.error('Failed to reload app:', error);
-                    Alert.alert(
-                      'Restart Required',
-                      'Please completely close and reopen the app to apply the update.',
-                      [{ text: 'OK' }]
-                    );
-                  });
-                },
+                onPress: () =>
+                  Updates.reloadAsync().catch((err: Error) => {
+                    captureException(err, { actionType: 'OTA_RELOAD_FAILED' });
+                    Alert.alert('Restart Required', 'Please close and reopen the app.', [
+                      { text: 'OK' },
+                    ]);
+                  }),
               },
             ]
           );
         } catch (downloadError) {
-          console.error('❌ Update download failed:', downloadError);
+          captureException(
+            downloadError instanceof Error ? downloadError : new Error(String(downloadError)),
+            { actionType: 'OTA_DOWNLOAD_FAILED' }
+          );
         }
       } else {
-        console.log('✅ App is up to date');
+        Logger.debug('App is up to date', { actionType: 'OTA_UP_TO_DATE' });
       }
     } catch (error) {
-      console.error(`❌ Update check failed (attempt ${retryCount + 1}):`, error);
-      
+      Logger.warn(`OTA check failed (attempt ${retryCount + 1})`, {
+        actionType: 'OTA_CHECK_FAILED',
+        retryCount,
+      });
       if (retryCount < 2) {
-        console.log(`🔄 Retrying update check in 2s...`);
         setTimeout(() => checkForUpdates(retryCount + 1), 2000);
-      } else {
-        console.log('⚠️ All update check attempts failed');
       }
     } finally {
       setIsUpdateChecking(false);
     }
   };
 
+  // ─── App startup ───────────────────────────────────────────────────────
   useEffect(() => {
     async function prepare() {
       try {
-        console.log('🚀 Preparing app...');
-        
-        // CRITICAL: Only check for updates, don't wait for it
+        Logger.info('App startup — preparing…', { actionType: 'APP_PREPARE_START' });
         if (!__DEV__) {
-          checkForUpdates().catch(error => {
-            console.error('Initial update check failed:', error);
-          });
+          checkForUpdates().catch((err: Error) =>
+            captureException(err, { actionType: 'OTA_INITIAL_CHECK_FAILED' })
+          );
         }
-        
-        // Minimum splash screen time
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        console.log('✅ App prepared');
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+        Logger.info('App prepared', { actionType: 'APP_PREPARE_COMPLETE' });
       } catch (e) {
-        console.error('❌ App preparation failed:', e);
-        setCriticalError(e instanceof Error ? e.message : 'Unknown error');
+        const err = e instanceof Error ? e : new Error(String(e));
+        captureException(err, { actionType: 'APP_PREPARE_FAILED' });
+        setCriticalError(err.message);
       } finally {
         setAppIsReady(true);
       }
     }
-
     prepare();
   }, []);
 
-  
-  useEffect(() => {
-    // Schedule initial check
-    const initialCheck = setTimeout(() => {
-      NotificationService.scheduleUpcomingReminders();
-    }, 5000); // Wait 5 seconds after app loads
-    
-    // Then check daily
-    const dailyCheck = setInterval(() => {
-      NotificationService.scheduleUpcomingReminders();
-    }, 24 * 60 * 60 * 1000); // 24 hours
-    
-    return () => {
-      clearTimeout(initialCheck);
-      clearInterval(dailyCheck);
-    };
-  }, []);
-
+  // ─── Splash screen ─────────────────────────────────────────────────────
   const onLayoutRootView = useCallback(async () => {
-    if (appIsReady) {
-      await SplashScreen.hideAsync();
-    }
+    if (appIsReady) await SplashScreen.hideAsync();
   }, [appIsReady]);
 
+  // ─── Resume update check ───────────────────────────────────────────────
   useEffect(() => {
-    const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'active' && !__DEV__) {
-        setTimeout(() => {
-          checkForUpdates();
-        }, 1000);
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active' && !__DEV__) {
+        setTimeout(() => checkForUpdates(), 1000);
       }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-
-    return () => {
-      subscription.remove();
-    };
+    });
+    return () => sub.remove();
   }, []);
 
+  // ─── Background EAS Updates listener (SDK version-dependent) ───────────
   useEffect(() => {
     if (__DEV__) return;
+    // expo-updates addListener / UpdateEventType are available from SDK 51+.
+    // If your SDK version exposes them, un-comment the block below.
+    // const sub = Updates.addListener((event) => { ... });
+    // return () => sub.remove();
+  }, []);
 
-    let updateListener: any = null;
-
-    const setupUpdateListener = () => {
+  // ─── Android navigation bar ────────────────────────────────────────────
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    (async () => {
       try {
-        updateListener = Updates.addListener((updateEvent) => {
-          switch (updateEvent.type) {
-            case Updates.UpdateEventType.UPDATE_AVAILABLE:
-              console.log('📦 Background update available');
-              Updates.fetchUpdateAsync().then(() => {
-                console.log('✅ Background update downloaded successfully');
-              }).catch(error => {
-                console.error('❌ Background update download failed:', error);
-              });
-              break;
-
-            case Updates.UpdateEventType.ERROR:
-              console.error('❌ Update error:', updateEvent.message);
-              break;
-          }
-        });
-
-        console.log('✅ EAS Updates listener registered');
-      } catch (error) {
-        console.error('❌ Failed to setup update listener:', error);
-        setTimeout(setupUpdateListener, 5000);
-      }
-    };
-
-    setupUpdateListener();
-
-    return () => {
-      if (updateListener) {
-        try {
-          updateListener.remove();
-          console.log('✅ EAS Updates listener removed');
-        } catch (error) {
-          console.error('❌ Error removing update listener:', error);
+        if (NavigationBar?.setBackgroundColorAsync) {
+          await NavigationBar.setBackgroundColorAsync('#FFFFFF');
+          await NavigationBar.setButtonStyleAsync('dark');
         }
+      } catch {
+        Logger.debug('Navigation bar styling not available', { actionType: 'NAV_BAR_STYLE' });
       }
-    };
+    })();
   }, []);
 
-  useEffect(() => {
-    const styleNavigationBar = async () => {
-      if (Platform.OS === 'android') {
-        try {
-          if (NavigationBar && NavigationBar.setBackgroundColorAsync) {
-            await NavigationBar.setBackgroundColorAsync('#FFFFFF');
-            await NavigationBar.setButtonStyleAsync('dark');
-            console.log('✅ Navigation bar styled successfully');
-          }
-        } catch (error) {
-          console.log('⚠️ Navigation bar styling not available');
-        }
-      }
-    };
-
-    styleNavigationBar();
-  }, []);
-
-  useEffect(() => {
-    const removeHandler = NotificationService.setupNotificationResponseHandler(async (response) => {
-      const { actionIdentifier, notification } = response;
-      const { tenantId, tenantName, dueDate, amount } = notification.request.content.data;
-
-      console.log('🔔 Notification action received:', {
-        action: actionIdentifier,
-        tenant: tenantName,
-        tenantId
-      });
-
-      try {
-        switch (actionIdentifier) {
-          case 'MARK_PAID':
-            console.log('💰 Opening payment screen for tenant:', tenantName);
-            router.push({
-              pathname: '/record-payment',
-              params: { 
-                tenantId: tenantId.toString(),
-                prefillAmount: amount?.toString() || ''
-              }
-            });
-            break;
-            
-          case 'SNOOZE_DAY':
-            console.log('⏰ Snoozing reminder for:', tenantName);
-            try {
-              await NotificationService.snoozeReminder(
-                parseInt(tenantId.toString()), 
-                dueDate, 
-                1
-              );
-              Alert.alert(
-                '✅ Reminder Snoozed', 
-                `Reminder for ${tenantName} has been snoozed for 1 day.`,
-                [{ text: 'OK' }]
-              );
-            } catch (snoozeError) {
-              console.error('Failed to snooze:', snoozeError);
-              Alert.alert(
-                '❌ Snooze Failed', 
-                'Could not snooze the reminder. Please try again.',
-                [{ text: 'OK' }]
-              );
-            }
-            break;
-            
-          default:
-            console.log('👆 Opening tenant details for:', tenantName);
-            router.push(`/tenant-details?tenantId=${tenantId}`);
-            break;
-        }
-      } catch (error) {
-        console.error('❌ Error handling notification action:', error);
-        Alert.alert(
-          'Error',
-          'Failed to process notification action. Please try again.',
-          [{ text: 'OK' }]
-        );
-      }
-    });
-
-    return removeHandler;
-  }, [router]);
-
-  useEffect(() => {
-    const removeForegroundHandler = NotificationService.setupForegroundNotificationHandler((notification) => {
-      console.log('📬 Notification received in foreground:', notification.request.content.title);
-    });
-
-    return removeForegroundHandler;
-  }, []);
-
-  if (!appIsReady) {
-    return null;
-  }
+  // ─── Render ────────────────────────────────────────────────────────────
+  if (!appIsReady) return null;
 
   if (criticalError) {
     return (
@@ -340,61 +307,19 @@ const loadDashboardData = useCallback(async () => {
   }
 
   return (
-    <ErrorBoundary>
-      <SafeAreaProvider>
-        <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
-          <StatusBar style="dark" translucent={false} />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen 
-              name="tenant-details" 
-              options={{ 
-                title: 'Tenant Details',
-                headerShown: true,
-                headerBackTitle: 'Back'
-              }} 
-            />
-            <Stack.Screen 
-              name="record-payment" 
-              options={{ 
-                title: 'Record Payment',
-                headerShown: true,
-                headerBackTitle: 'Back'
-              }} 
-            />
-            <Stack.Screen 
-              name="add-tenant" 
-              options={{ 
-                title: 'Add Tenant',
-                headerShown: false,
-                headerBackTitle: 'Back'
-              }} 
-            />
-            <Stack.Screen 
-              name="edit-tenant" 
-              options={{ 
-                title: 'Edit Tenant',
-                headerShown: true,
-                headerBackTitle: 'Back'
-              }} 
-            />
-          </Stack>
-        </View>
-      </SafeAreaProvider>
-    </ErrorBoundary>
+    <AuthProvider>
+      <ThemeProvider>
+        <ErrorBoundary>
+          <RepositoriesProvider>
+            <SafeAreaProvider>
+              <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+                <StatusBar style="auto" translucent={false} />
+                <RootLayoutNav />
+              </View>
+            </SafeAreaProvider>
+          </RepositoriesProvider>
+        </ErrorBoundary>
+      </ThemeProvider>
+    </AuthProvider>
   );
-}
-
-function setStats(dashboardStats: { totalTenants: number; overdueTenants: number; dueSoonTenants: number; paidTenants: number; totalMonthlyRent: number; totalCreditBalance: number; }) {
-  throw new Error('Function not implemented.');
-}
-
-
-function setPayments(recentPayments: Payment[]) {
-  throw new Error('Function not implemented.');
-}
-
-
-function setLastUpdated(arg0: Date) {
-  throw new Error('Function not implemented.');
 }

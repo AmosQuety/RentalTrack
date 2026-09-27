@@ -1,6 +1,6 @@
-// components/ErrorBoundary.tsx
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { captureException } from '../services/logger/monitoring';
 
 interface Props {
   children: React.ReactNode;
@@ -27,8 +27,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('🚨 ErrorBoundary caught error:', error);
-    console.error('🚨 Error info:', errorInfo);
+    captureException(error, { componentStack: errorInfo.componentStack });
     
     this.setState({
       error,

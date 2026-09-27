@@ -2,31 +2,35 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useAutoRefresh, useDatabase } from '../hooks/use-db';
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useDatabase } from '../hooks/use-db';
+import { useAuth } from '../context/AuthContext';
 import { Payment, Tenant } from '../libs/types';
+import { ReportGenerator } from '../services/ReportGenerator';
 
 export default function TenantDetails() {
   const { tenantId } = useLocalSearchParams();
   const router = useRouter();
   const { isInitialized, getTenant, getPaymentHistory, deleteTenant } = useDatabase();
+  const { user } = useAuth();
   
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   const loadTenantData = useCallback(async () => {
-    if (!tenantId || !isInitialized) return;
+    if (!tenantId || !isInitialized || !user) return;
     
     try {
       console.log('🔄 Tenant Details: Loading data...');
       // Set loading to true only if it's the initial load
       if (!tenant) setLoading(true);
-      const tenantData = await getTenant(parseInt(tenantId as string));
+      const tenantData = await getTenant(parseInt(tenantId as string), user.user_id);
       setTenant(tenantData);
 
-      if (tenantData) {
-        const paymentData = await getPaymentHistory(tenantData.tenant_id);
+      if (tenantData && user) {
+        const paymentData = await getPaymentHistory(tenantData.tenant_id, user.user_id);
         setPayments(paymentData);
       }
       console.log('✅ Tenant Details: Data loaded');
@@ -38,11 +42,12 @@ export default function TenantDetails() {
     }
   }, [tenantId, isInitialized, getTenant, getPaymentHistory, tenant]);
 
-  // Auto-refresh on database changes
-  const { isRefreshing, refresh } = useAutoRefresh(loadTenantData, [
-    'tenant_updated',
-    'payment_recorded'
-  ]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refresh = async () => {
+    setIsRefreshing(true);
+    await loadTenantData();
+    setIsRefreshing(false);
+  };
 
   // Initial load
   useEffect(() => {
@@ -76,8 +81,9 @@ export default function TenantDetails() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            if (!user) return;
             try {
-              await deleteTenant(tenant!.tenant_id);
+              await deleteTenant(tenant!.tenant_id, user.user_id);
               Alert.alert('Success', 'Tenant deleted successfully', [
                 { text: 'OK', onPress: () => router.back() }
               ]);
@@ -102,6 +108,18 @@ export default function TenantDetails() {
 
   const handleRecordPayment = () => {
     router.push(`/record-payment?tenantId=${tenantId}`);
+  };
+
+  const handleShareStatement = async () => {
+    if (!tenant) return;
+    try {
+      setIsGeneratingPdf(true);
+      await ReportGenerator.generateTenantStatement(tenant, payments, 'UGX');
+    } catch (err) {
+      Alert.alert('Error', 'Could not generate tenant statement PDF.');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   // --- CORRECTED PAYMENT FOOTER LOGIC ---
@@ -270,6 +288,18 @@ export default function TenantDetails() {
           style={styles.secondaryButton}
         >
           <Text style={styles.secondaryButtonText}>Edit Tenant</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={handleShareStatement}
+          style={styles.statementButton}
+          disabled={isGeneratingPdf}
+        >
+          {isGeneratingPdf ? (
+            <ActivityIndicator color="#007AFF" />
+          ) : (
+            <Text style={styles.statementButtonText}>Share Statement PDF</Text>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -453,6 +483,20 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  statementButton: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    alignItems: 'center',
+  },
+  statementButtonText: {
+    color: '#1D4ED8',
     fontSize: 16,
     fontWeight: '600',
   },

@@ -1,4 +1,4 @@
-// app/edit-tenant.tsx - UPDATED
+// app/edit-tenant.tsx - PREMIUM REDESIGN
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
@@ -8,47 +8,24 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import DateInput from "../components/DateInput"; // NEW IMPORT
+import DateInput from "../components/DateInput";
 import { useDatabase } from "../hooks/use-db";
-
-const InputField = ({
-  label,
-  value,
-  onChange,
-  placeholder,
-  keyboardType = "default",
-  required = false,
-  icon = null,
-  multiline = false,
-}) => (
-  <View style={styles.inputContainer}>
-    <Text style={styles.inputLabel}>
-      {label} {required && <Text style={styles.required}>*</Text>}
-    </Text>
-    <View style={[styles.inputWrapper, multiline && styles.multilineInput]}>
-      {icon && <View style={styles.iconContainer}>{icon}</View>}
-      <TextInput
-        style={[styles.textInput, multiline && styles.multilineText]}
-        placeholder={placeholder}
-        placeholderTextColor="#9CA3AF"
-        value={value}
-        onChangeText={onChange}
-        keyboardType={keyboardType}
-        multiline={multiline}
-        textAlignVertical={multiline ? 'top' : 'center'}
-      />
-    </View>
-  </View>
-);
+import { useAuth } from "../context/AuthContext";
+import { Logger } from "../services/logger/index";
+import { useTheme } from "../theme/ThemeContext";
+import { InputField } from "../components/ui/InputField";
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
 
 export default function EditTenant() {
   const { tenantId } = useLocalSearchParams();
   const router = useRouter();
   const { isInitialized, getTenant, updateTenant } = useDatabase();
+  const { user } = useAuth();
+  const { colors, typography } = useTheme();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -65,10 +42,10 @@ export default function EditTenant() {
   const [isLoadingData, setIsLoadingData] = useState(true);
 
   const loadTenantData = async () => {
-    if (!tenantId || !isInitialized) return;
+    if (!tenantId || !isInitialized || !user) return;
     
     try {
-      const tenant = await getTenant(parseInt(tenantId as string));
+      const tenant = await getTenant(parseInt(tenantId as string), user.user_id);
       if (tenant) {
         setFormData({
           name: tenant.name,
@@ -82,7 +59,7 @@ export default function EditTenant() {
         });
       }
     } catch (error) {
-      console.error("Error loading tenant data:", error);
+      Logger.error("Error loading tenant data", { actionType: "TENANT_LOAD_ERROR", error });
       Alert.alert("Error", "Failed to load tenant data");
     } finally {
       setIsLoadingData(false);
@@ -95,24 +72,23 @@ export default function EditTenant() {
 
   const handleUpdateTenant = async () => {
     if (!formData.name.trim() || !formData.roomNumber.trim() || !formData.monthlyRent) {
-      Alert.alert(
+       Alert.alert(
         "Missing Information",
         "Please fill in all required fields.*.",
         [{ text: "OK", style: "default" }]);
       return;
     }
 
-     const monthlyRent = parseFloat(formData.monthlyRent);
+    const monthlyRent = parseFloat(formData.monthlyRent);
     if (isNaN(monthlyRent) || monthlyRent <= 0) {
-    Alert.alert(
-      "Invalid Amount",
-      "Please enter a valid monthly rent amount.",
-      [{ text: "OK", style: "default" }]
-    );
-    return;
-  }
+      Alert.alert(
+        "Invalid Amount",
+        "Please enter a valid monthly rent amount.",
+        [{ text: "OK", style: "default" }]
+      );
+      return;
+    }
 
-    // Validate contract dates
     if (formData.contractEndDate && formData.startDate > formData.contractEndDate) {
       Alert.alert(
         "Invalid Dates",
@@ -122,9 +98,10 @@ export default function EditTenant() {
       return;
     }
 
+    if (!user) return;
     setIsLoading(true);
     try {
-      await updateTenant(parseInt(tenantId as string), {
+      await updateTenant(parseInt(tenantId as string), user.user_id, {
         name: formData.name.trim(),
         phone: formData.phone.trim(),
         roomNumber: formData.roomNumber.trim(),
@@ -139,25 +116,25 @@ export default function EditTenant() {
         "Success", "Tenant updated successfully!", [
         { text: "OK", onPress: () => router.back() },
       ]);
-    } catch (error) {
-      console.error("Error updating tenant:", error);
+    } catch (error: any) {
+      Logger.error("Error updating tenant", { actionType: "TENANT_UPDATE_ERROR", error });
 
        let errorMessage = "Failed to update tenant information. Please try again.";
-    let errorTitle = "Error";
+      let errorTitle = "Error";
     
-    if (error.message.includes('Room "')) {
-      errorTitle = "🚫 Room Already Occupied";
-      errorMessage = error.message;
-    } else if (error.message.includes('Unable to verify room availability')) {
-      errorTitle = "⚠️ System Busy";
-      errorMessage = error.message;
-    }
+      if (error.message.includes('Room "')) {
+        errorTitle = "🚫 Room Already Occupied";
+        errorMessage = error.message;
+      } else if (error.message.includes('Unable to verify room availability')) {
+        errorTitle = "⚠️ System Busy";
+        errorMessage = error.message;
+      }
     
-    Alert.alert(
-      errorTitle,
-      errorMessage,
-      [{ text: "OK", style: "default" }]
-    );
+      Alert.alert(
+        errorTitle,
+        errorMessage,
+        [{ text: "OK", style: "default" }]
+      );
     } finally {
       setIsLoading(false);
     }
@@ -165,9 +142,9 @@ export default function EditTenant() {
 
   if (!isInitialized || isLoadingData) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#2563EB" />
-        <Text style={styles.loadingText}>
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
           {isLoadingData ? "Loading tenant data..." : "Initializing database..."}
         </Text>
       </View>
@@ -175,16 +152,16 @@ export default function EditTenant() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity
           onPress={() => router.back()}
-          style={styles.backButton}
+          style={[styles.backButton, { backgroundColor: colors.inputBackground }]}
         >
-          <Ionicons name="chevron-back" size={24} color="#374151" />
+          <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit Tenant</Text>
+        <Text style={[styles.headerTitle, { color: colors.text, fontFamily: typography.fonts.bold }]}>Edit Tenant</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -194,67 +171,56 @@ export default function EditTenant() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.formContainer}>
-          <Text style={styles.formTitle}>Edit Tenant Details</Text>
+        <Card style={styles.formContainer}>
+          <Text style={[styles.formTitle, { color: colors.text, fontFamily: typography.fonts.semibold }]}>Edit Tenant Details</Text>
 
           <InputField
-            label="Full Name"
+            label="Full Name *"
             value={formData.name}
-            onChange={(text) => setFormData((prev) => ({ ...prev, name: text }))}
-            placeholder="Enter tenant's full name"
-            required
-            icon={<Ionicons name="person-outline" size={20} color="#6B7280" />}
+            onChangeText={(text) => setFormData((prev) => ({ ...prev, name: text }))}
+            leftIcon={<Ionicons name="person-outline" size={20} color={colors.textSecondary} />}
           />
 
           <InputField
             label="Phone Number"
             value={formData.phone}
-            onChange={(text) => setFormData((prev) => ({ ...prev, phone: text }))}
-            placeholder="Enter phone number"
+            onChangeText={(text) => setFormData((prev) => ({ ...prev, phone: text }))}
             keyboardType="phone-pad"
-            icon={<Ionicons name="call-outline" size={20} color="#6B7280" />}
+            leftIcon={<Ionicons name="call-outline" size={20} color={colors.textSecondary} />}
           />
 
           <InputField
-            label="Room Number"
+            label="Room Number *"
             value={formData.roomNumber}
-            onChange={(text) => setFormData((prev) => ({ ...prev, roomNumber: text }))}
-            placeholder="Enter room number"
-            required
-            icon={<Ionicons name="business-outline" size={20} color="#6B7280" />}
+            onChangeText={(text) => setFormData((prev) => ({ ...prev, roomNumber: text }))}
+            leftIcon={<Ionicons name="business-outline" size={20} color={colors.textSecondary} />}
           />
 
           <InputField
-            label="Monthly Rent (UGX)"
+            label="Monthly Rent (UGX) *"
             value={formData.monthlyRent}
-            onChange={(text) => setFormData((prev) => ({ ...prev, monthlyRent: text }))}
-            placeholder="Enter monthly rent"
+            onChangeText={(text) => setFormData((prev) => ({ ...prev, monthlyRent: text }))}
             keyboardType="numeric"
-            required
-            icon={<Ionicons name="cash-outline" size={20} color="#6B7280" />}
+            leftIcon={<Ionicons name="cash-outline" size={20} color={colors.textSecondary} />}
           />
 
-          {/* NEW: Date Inputs */}
           <DateInput
             label="Move-in Date"
             value={formData.startDate}
             onChange={(isoDate) => setFormData((prev) => ({ ...prev, startDate: isoDate }))}
             required
-            maxDate={new Date()} // Move-in date shouldn't be in future
-            placeholder="DD/MM/YYYY"
+            maxDate={new Date()}
           />
 
           <DateInput
             label="Contract End Date"
             value={formData.contractEndDate}
             onChange={(isoDate) => setFormData((prev) => ({ ...prev, contractEndDate: isoDate }))}
-            minDate={new Date(formData.startDate)} // End date after start date
-            placeholder="DD/MM/YYYY (optional)"
+            minDate={new Date(formData.startDate)}
           />
 
-          {/* Rent Cycle Selector */}
           <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>
               Rent Cycle <Text style={styles.required}>*</Text>
             </Text>
             <View style={styles.cycleOptions}>
@@ -264,12 +230,18 @@ export default function EditTenant() {
                   onPress={() => setFormData(prev => ({ ...prev, rentCycle: cycle as any }))}
                   style={[
                     styles.cycleOption,
-                    formData.rentCycle === cycle && styles.cycleOptionSelected
+                    { 
+                      backgroundColor: formData.rentCycle === cycle ? colors.primary : colors.inputBackground,
+                      borderColor: formData.rentCycle === cycle ? colors.primary : colors.border
+                    }
                   ]}
                 >
                   <Text style={[
                     styles.cycleOptionText,
-                    formData.rentCycle === cycle && styles.cycleOptionTextSelected
+                    { 
+                      color: formData.rentCycle === cycle ? colors.primaryContrast : colors.text,
+                      fontFamily: typography.fonts.medium
+                    }
                   ]}>
                     {cycle.charAt(0).toUpperCase() + cycle.slice(1)}
                   </Text>
@@ -281,46 +253,38 @@ export default function EditTenant() {
           <InputField
             label="Notes"
             value={formData.notes}
-            onChange={(text) => setFormData((prev) => ({ ...prev, notes: text }))}
-            placeholder="Additional notes..."
+            onChangeText={(text) => setFormData((prev) => ({ ...prev, notes: text }))}
             multiline
-            icon={<Ionicons name="document-text-outline" size={20} color="#6B7280" />}
+            containerStyle={{ marginTop: 20 }}
+            leftIcon={<Ionicons name="document-text-outline" size={20} color={colors.textSecondary} />}
           />
-        </View>
+        </Card>
 
-        {/* Buttons */}
         <View style={styles.buttonsContainer}>
-          <TouchableOpacity
+          <Button 
+            title={isLoading ? "Updating..." : "Update Tenant"}
             onPress={handleUpdateTenant}
-            disabled={isLoading}
-            style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
-          >
-            <View style={styles.buttonContent}>
-              {isLoading && <ActivityIndicator color="#fff" style={styles.buttonSpinner} />}
-              <Text style={styles.primaryButtonText}>
-                {isLoading ? "Updating..." : "Update Tenant"}
-              </Text>
-            </View>
-          </TouchableOpacity>
+            loading={isLoading}
+            size="lg"
+            style={{ marginBottom: 16 }}
+          />
 
-          <TouchableOpacity
+          <Button 
+            title="Cancel"
+            variant="secondary"
             onPress={() => router.back()}
             disabled={isLoading}
-            style={[styles.secondaryButton, isLoading && styles.buttonDisabled]}
-          >
-            <Text style={styles.secondaryButtonText}>Cancel</Text>
-          </TouchableOpacity>
+            size="lg"
+          />
         </View>
       </ScrollView>
     </View>
   );
 }
 
-// Your existing styles remain exactly the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F9FAFB",
   },
   centerContainer: {
     flex: 1,
@@ -329,7 +293,6 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 8,
-    color: "#6B7280",
   },
   header: {
     flexDirection: "row",
@@ -338,27 +301,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 60,
     paddingBottom: 16,
-    backgroundColor: "#FFFFFF",
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E5E5",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
   },
   backButton: {
     width: 40,
     height: 40,
-    backgroundColor: "#F3F4F6",
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#1F2937",
   },
   headerSpacer: {
     width: 40,
@@ -369,22 +322,11 @@ const styles = StyleSheet.create({
     paddingTop: 24,
   },
   formContainer: {
-    backgroundColor: "#FFFFFF",
     padding: 24,
-    borderRadius: 16,
     marginBottom: 24,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-    borderWidth: 1,
-    borderColor: "#F3F4F6",
   },
   formTitle: {
     fontSize: 18,
-    fontWeight: "600",
-    color: "#1F2937",
     marginBottom: 24,
   },
   inputContainer: {
@@ -392,107 +334,26 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: "500",
-    color: "#374151",
     marginBottom: 8,
   },
   required: {
     color: "#EF4444",
   },
-  inputWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    height: 56,
-  },
-  multilineInput: {
-    height: 100,
-    alignItems: "flex-start",
-    paddingTop: 12,
-  },
-  iconContainer: {
-    marginRight: 8,
-  },
-  textInput: {
-    flex: 1,
-    fontSize: 16,
-    color: "#1F2937",
-  },
-  multilineText: {
-    height: 80,
-    textAlignVertical: "top",
-  },
-  buttonsContainer: {
-    paddingBottom: 32,
-  },
-  primaryButton: {
-    backgroundColor: "#2563EB",
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  secondaryButton: {
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 12,
-    backgroundColor: "#FFFFFF",
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  buttonSpinner: {
-    marginRight: 8,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-    textAlign: "center",
-  },
-  secondaryButtonText: {
-    color: "#374151",
-    fontSize: 16,
-    fontWeight: "600",
-    textAlign: "center",
-  },
   cycleOptions: {
-  flexDirection: 'row',
-  gap: 8,
+    flexDirection: 'row',
+    gap: 8,
   },
   cycleOption: {
     flex: 1,
     padding: 12,
-    borderRadius: 8,
-    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
     alignItems: 'center',
-  },
-  cycleOptionSelected: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
   },
   cycleOptionText: {
     fontSize: 14,
-    color: '#374151',
-    fontWeight: '500',
   },
-  cycleOptionTextSelected: {
-    color: '#FFFFFF',
+  buttonsContainer: {
+    paddingBottom: 40,
   },
 });

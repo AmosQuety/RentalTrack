@@ -3,10 +3,23 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import DateInput from '../components/DateInput';
+import { calculatePaymentBreakdown } from '../domain/financial';
+import { Logger } from '../services/logger/index';
 import { useDatabase } from '../hooks/use-db';
+import { useAuth } from '../context/AuthContext';
 import { Tenant } from '../libs/types';
 
 // Reusable InputField component
+interface InputFieldProps {
+  label: string;
+  value: string;
+  onChange: (text: string) => void;
+  placeholder?: string;
+  keyboardType?: 'default' | 'numeric' | 'email-address' | 'phone-pad';
+  required?: boolean;
+  multiline?: boolean;
+}
+
 const InputField = ({ 
   label, 
   value, 
@@ -15,7 +28,7 @@ const InputField = ({
   keyboardType = 'default', 
   required = false, 
   multiline = false 
-}) => (
+}: InputFieldProps) => (
   <View style={styles.inputContainer}>
     <Text style={styles.inputLabel}>
       {label} {required && <Text style={styles.required}>*</Text>}
@@ -49,6 +62,7 @@ export default function RecordPayment() {
   const { tenantId, prefillAmount } = useLocalSearchParams();
   const router = useRouter();
   const { isInitialized, getTenant, recordPayment } = useDatabase();
+  const { user } = useAuth();
   
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [formData, setFormData] = useState({
@@ -71,38 +85,39 @@ export default function RecordPayment() {
   const paymentMethods = ['Cash', 'Mobile Money', 'Bank Transfer', 'Other'];
 
   // Calculate payment summary
-  const calculatePaymentSummary = (tenantData: Tenant, amount: number) => {
+  const updatePaymentSummary = (tenantData: Tenant, amount: number) => {
     if (!isNaN(amount) && tenantData.monthly_rent > 0) {
-      const currentCredit = tenantData.credit_balance || 0;
-      const totalAvailable = amount + currentCredit;
-      const fullMonths = Math.floor(totalAvailable / tenantData.monthly_rent);
-      const remaining = totalAvailable % tenantData.monthly_rent;
+      // Calculate based on the tenant's last payment or start date
+      // For a quick UI calculation without fetching latest payments, we can approximate 
+      // based on contract start or next due date, but since we just need balances here:
+      const breakdown = calculatePaymentBreakdown(
+        amount,
+        tenantData.credit_balance || 0,
+        tenantData.monthly_rent,
+        new Date(), // Base date isn't crucial for just balances, but we need it for nextDueDate
+        tenantData.rent_cycle || 'monthly'
+      );
       
-      // Calculate next due date
-      const nextDue = new Date();
-      nextDue.setMonth(nextDue.getMonth() + fullMonths);
-      
-      const willBeFullyPaid = remaining === 0 && fullMonths > 0;
-      const balanceDue = tenantData.monthly_rent - remaining;
+      // Keep nextDueDate as approximation since we evaluate actual nextDueDate in DB
       
       setPaymentSummary({
-        fullMonths,
-        remainingAmount: remaining,
-        nextDueDate: nextDue.toISOString().split('T')[0],
-        currentCredit,
-        totalAvailable,
-        willBeFullyPaid,
-        balanceDue: remaining > 0 ? 0 : balanceDue
+        fullMonths: breakdown.fullCyclesCovered,
+        remainingAmount: breakdown.newCreditBalance,
+        nextDueDate: breakdown.nextDueDate.toISOString().split('T')[0],
+        currentCredit: tenantData.credit_balance || 0,
+        totalAvailable: breakdown.totalAvailable,
+        willBeFullyPaid: breakdown.isFullyPaid,
+        balanceDue: breakdown.balanceDueForCurrentCycle
       });
     }
   };
 
   // Load tenant data
   const loadTenantData = async () => {
-    if (!tenantId || !isInitialized) return;
+    if (!tenantId || !isInitialized || !user) return;
     
     try {
-      const tenantData = await getTenant(parseInt(tenantId as string));
+      const tenantData = await getTenant(parseInt(tenantId as string), user.user_id);
       setTenant(tenantData);
       
       // Set default payment date to today
@@ -111,10 +126,10 @@ export default function RecordPayment() {
       
       // Calculate initial payment summary if amount exists
       if (tenantData && formData.amount) {
-        calculatePaymentSummary(tenantData, parseFloat(formData.amount));
+        updatePaymentSummary(tenantData, parseFloat(formData.amount));
       }
     } catch (error) {
-      console.error('Failed to load tenant:', error);
+      Logger.error('Failed to load tenant', { error });
       Alert.alert('Error', 'Failed to load tenant details');
     }
   };
@@ -150,9 +165,10 @@ export default function RecordPayment() {
       );
     }
 
+    if (!user) return;
     setIsLoading(true);
     try {
-      await recordPayment({
+      await recordPayment(user.user_id, {
         tenantId: parseInt(tenantId as string),
         amountPaid: amount,
         paymentDate: formData.paymentDate,
@@ -164,7 +180,7 @@ export default function RecordPayment() {
         { text: 'OK', onPress: () => router.back() }
       ]);
     } catch (error) {
-      console.error('Failed to record payment:', error);
+      Logger.error('Failed to record payment', { actionType: 'PAYMENT_RECORD_ERROR', error });
       Alert.alert('Error', 'Failed to record payment. Please try again.');
     } finally {
       setIsLoading(false);
@@ -181,7 +197,7 @@ export default function RecordPayment() {
   useEffect(() => {
     if (formData.amount && tenant) {
       const amount = parseFloat(formData.amount);
-      calculatePaymentSummary(tenant, amount);
+      updatePaymentSummary(tenant, amount);
     }
   }, [formData.amount, tenant]);
 

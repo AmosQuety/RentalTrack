@@ -1,69 +1,64 @@
-// app/(tabs)/index.tsx - WITH AUTO-REFRESH
+// app/(tabs)/index.tsx - PREMIUM REDESIGN
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useAutoRefresh, useDatabase } from '../../hooks/use-db';
+import { useDatabase } from '../../hooks/use-db';
+import { useAuth } from '../../context/AuthContext';
 import { Tenant } from '../../libs/types';
-
+import { useTheme } from '../../theme/ThemeContext';
+import { Card } from '../../components/ui/Card';
+import { Button } from '../../components/ui/Button';
 
 export default function Dashboard() {
-  const { isInitialized, getAllTenants, getPaymentStats, heartbeatResults } = useDatabase();
+  const { isInitialized, getAllTenants, getDashboardStats, heartbeatResults } = useDatabase();
+  const { user } = useAuth();
   const router = useRouter();
+  const { colors, typography, isDark } = useTheme();
+  
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [stats, setStats] = useState({
-    total: 0,
-    paid: 0,
-    dueSoon: 0,
-    overdue: 0
-  });
-  const [paymentStats, setPaymentStats] = useState({
-    totalCollected: 0,
-    thisMonth: 0,
-    lastMonth: 0,
-    overdueAmount: 0,
+  const [dashboardStats, setDashboardStats] = useState({
+    totalTenants: 0,
+    overdueTenants: 0,
+    dueSoonTenants: 0,
+    paidTenants: 0,
+    totalMonthlyRent: 0,
+    totalCreditBalance: 0,
+    collectionRate: 0,
   });
 
   const loadData = useCallback(async () => {
-    if (!isInitialized) return;
+    if (!isInitialized || !user) return;
     
     try {
       console.log('🔄 Dashboard: Loading data...');
-      const allTenants = await getAllTenants();
-      setTenants(allTenants);
+      const [allTenants, stats] = await Promise.all([
+        getAllTenants(user.user_id),
+        getDashboardStats(user.user_id)
+      ]);
       
-      setStats({
-        total: allTenants.length,
-        paid: allTenants.filter(t => t.status === 'Paid').length,
-        dueSoon: allTenants.filter(t => t.status === 'Due Soon').length,
-        overdue: allTenants.filter(t => t.status === 'Overdue').length
-      });
-
-      const stats = await getPaymentStats();
-      setPaymentStats(stats);
+      setTenants(allTenants);
+      setDashboardStats(stats);
       console.log('✅ Dashboard: Data loaded');
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
     }
-  }, [isInitialized, getAllTenants, getPaymentStats]);
+  }, [isInitialized, user, getAllTenants, getDashboardStats]);
 
-  // Auto-refresh on database changes
-  const { isRefreshing, refresh } = useAutoRefresh(loadData, [
-    'tenant_added',
-    'tenant_updated',
-    'tenant_deleted',
-    'payment_recorded'
-  ]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const refresh = async () => {
+    setIsRefreshing(true);
+    await loadData();
+    setIsRefreshing(false);
+  };
 
-  // Initial load
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Refresh when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      console.log('🎯 Dashboard: Screen focused, refreshing...');
       loadData();
     }, [loadData])
   );
@@ -76,138 +71,202 @@ export default function Dashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Paid': return '#10B981';
-      case 'Due Soon': return '#F59E0B';
-      case 'Overdue': return '#EF4444';
-      default: return '#6B7280';
+      case 'Paid': return colors.success;
+      case 'Due Soon': return colors.warning;
+      case 'Overdue': return colors.danger;
+      default: return colors.textSecondary;
+    }
+  };
+
+  const getStatusBackground = (status: string) => {
+    switch (status) {
+      case 'Paid': return colors.successBackground;
+      case 'Due Soon': return colors.warningBackground;
+      case 'Overdue': return colors.dangerBackground;
+      default: return isDark ? colors.border : '#F3F4F6';
     }
   };
 
   if (!isInitialized) {
     return (
-      <View style={styles.centerContainer}>
-        <Text>Loading database...</Text>
+      <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
+        <Text style={{ color: colors.text }}>Loading database...</Text>
       </View>
     );
   }
 
+  // Use real collection rate from DB
+  const healthScore = dashboardStats.collectionRate;
+
   return (
     <ScrollView 
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={styles.contentContainer}
       refreshControl={
         <RefreshControl
           refreshing={isRefreshing}
           onRefresh={refresh}
-          colors={['#007AFF']}
-          tintColor="#007AFF"
+          colors={[colors.primary]}
+          tintColor={colors.primary}
         />
       }
     >
       <View style={styles.header}>
-        
-        <Text style={styles.subtitle}>Pull down to refresh</Text>
+        <Text style={[styles.greeting, { color: colors.textSecondary, fontFamily: typography.fonts.medium }]}>
+          {user ? `Hello, ${user.email.split('@')[0]}` : 'Good Morning,'}
+        </Text>
+        <Text style={[styles.title, { color: colors.text, fontFamily: typography.fonts.bold }]}>
+          Portfolio Overview
+        </Text>
       </View>
       
-      {/* Stats Cards */}
-      <View style={styles.statsContainer}>
-        <View style={[styles.statCard, { backgroundColor: '#DBEAFE' }]}>
-          <Text style={styles.statLabel}>Total Tenants</Text>
-          <Text style={styles.statValue}>{stats.total}</Text>
+      {/* 1. Hero Card: Primary Metrics */}
+      <Card style={[styles.heroCard, { backgroundColor: colors.primary }]}>
+        <View style={styles.heroRow}>
+          <View>
+            <Text style={[styles.heroLabel, { color: 'rgba(255,255,255,0.8)' }]}>Expected Monthly Rent</Text>
+            <Text style={[styles.heroAmount, { fontFamily: typography.fonts.bold }]}>
+              {formatCurrency(dashboardStats.totalMonthlyRent)} UGX
+            </Text>
+          </View>
+          <View style={styles.healthBadge}>
+            <Ionicons name="pulse" size={14} color="#10B981" />
+            <Text style={styles.healthText}>{healthScore}% Collection</Text>
+          </View>
         </View>
-        <View style={[styles.statCard, { backgroundColor: '#D1FAE5' }]}>
-          <Text style={styles.statLabel}>Paid</Text>
-          <Text style={styles.statValue}>{stats.paid}</Text>
+        
+        <View style={styles.heroDivider} />
+        
+        <View style={styles.heroMetrics}>
+          <View style={styles.heroMetricItem}>
+            <Text style={styles.heroMetricValue}>{dashboardStats.totalTenants}</Text>
+            <Text style={styles.heroMetricLabel}>Total Tenants</Text>
+          </View>
+          <View style={styles.heroMetricItem}>
+            <Text style={styles.heroMetricValue}>{dashboardStats.paidTenants}</Text>
+            <Text style={styles.heroMetricLabel}>Paid</Text>
+          </View>
+          <View style={styles.heroMetricItem}>
+            <Text style={[styles.heroMetricValue, { color: '#EF4444' }]}>
+              {dashboardStats.overdueTenants}
+            </Text>
+            <Text style={styles.heroMetricLabel}>Overdue</Text>
+          </View>
         </View>
-        <View style={[styles.statCard, { backgroundColor: '#DBEAFE' }]}>
-          <Text style={styles.statLabel}>Total Collected</Text>
-          <Text style={styles.statValue}>{formatCurrency(paymentStats.totalCollected)} UGX</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#D1FAE5' }]}>
-          <Text style={styles.statLabel}>This Month</Text>
-          <Text style={styles.statValue}>{formatCurrency(paymentStats.thisMonth)} UGX</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#FEF3C7' }]}>
-          <Text style={styles.statLabel}>Last Month</Text>
-          <Text style={styles.statValue}>{formatCurrency(paymentStats.lastMonth)} UGX</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#FEE2E2' }]}>
-          <Text style={styles.statLabel}>Overdue</Text>
-          <Text style={styles.statValue}>{formatCurrency(paymentStats.overdueAmount)} UGX</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#FEF3C7' }]}>
-          <Text style={styles.statLabel}>Due Soon</Text>
-          <Text style={styles.statValue}>{stats.dueSoon}</Text>
-        </View>
-        <View style={[styles.statCard, { backgroundColor: '#FEE2E2' }]}>
-          <Text style={styles.statLabel}>Overdue</Text>
-          <Text style={styles.statValue}>{stats.overdue}</Text>
-        </View>
+      </Card>
+
+      {/* 2. Secondary Metrics (Two columns) */}
+      <View style={styles.secondaryMetricsRow}>
+        <Card style={styles.smallMetricCard}>
+          <Ionicons name="wallet-outline" size={24} color={colors.primary} style={styles.metricIcon} />
+          <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>Total Outstanding</Text>
+          <Text style={[styles.metricValue, { color: colors.text, fontFamily: typography.fonts.semibold }]}>
+            {formatCurrency(Math.abs(dashboardStats.totalCreditBalance))}
+          </Text>
+        </Card>
+        <Card style={styles.smallMetricCard}>
+          <Ionicons name="alert-circle-outline" size={24} color={colors.danger} style={styles.metricIcon} />
+          <Text style={[styles.metricLabel, { color: colors.textSecondary }]}>Due Soon</Text>
+          <Text style={[styles.metricValue, { color: colors.warning, fontFamily: typography.fonts.semibold }]}>
+            {dashboardStats.dueSoonTenants} Tenants
+          </Text>
+        </Card>
       </View>
 
-      {/*  Show heartbeat alerts if any */}
-{heartbeatResults && (heartbeatResults.suspensionAlerts.length > 0 || heartbeatResults.contractAlerts.length > 0) && (
-  <View style={styles.alertContainer}>
-    <Text style={styles.alertTitle}>System Alerts</Text>
-    
-    {heartbeatResults.suspensionAlerts.map((alert, index) => (
-      <View key={index} style={[styles.alertItem, styles.suspensionAlert]}>
-        <Text style={styles.alertText}>🚨 {alert}</Text>
-      </View>
-    ))}
-    
-    {heartbeatResults.contractAlerts.map((alert, index) => (
-      <View key={index} style={[styles.alertItem, styles.contractAlert]}>
-        <Text style={styles.alertText}>📝 {alert}</Text>
-      </View>
-    ))}
-  </View>
-)}
+      {/* Show heartbeat alerts if any */}
+      {heartbeatResults && (heartbeatResults.suspensionAlerts.length > 0 || heartbeatResults.contractAlerts.length > 0) && (
+        <Card style={[styles.alertContainer, { backgroundColor: colors.warningBackground, borderColor: colors.warning }]}>
+          <Text style={[styles.alertTitle, { color: colors.warning }]}>System Alerts</Text>
+          
+          {heartbeatResults.suspensionAlerts.map((alert, index) => (
+            <View key={index} style={styles.alertItem}>
+              <Text style={[styles.alertText, { color: colors.text }]}>🚨 {alert}</Text>
+            </View>
+          ))}
+          
+          {heartbeatResults.contractAlerts.map((alert, index) => (
+            <View key={index} style={styles.alertItem}>
+              <Text style={[styles.alertText, { color: colors.text }]}>📝 {alert}</Text>
+            </View>
+          ))}
+        </Card>
+      )}
 
-      {/* Quick Actions */}
+      {/* 3. Quick Actions */}
       <View style={styles.actionsContainer}>
-        <TouchableOpacity 
-          style={styles.actionButton}
+        <Button 
+          title="Add New Tenant" 
           onPress={() => router.push('/add-tenant')}
-        >
-          <Text style={styles.actionButtonText}>Add Tenant(s)</Text>
+          leftIcon={<Ionicons name="add-circle" size={20} color={colors.primaryContrast} />}
+          size="lg"
+        />
+      </View>
+
+      {/* 4. Recent Tenants List */}
+      <View style={styles.sectionHeader}>
+        <Text style={[styles.sectionTitle, { color: colors.text, fontFamily: typography.fonts.semibold }]}>
+          Recent Tenants
+        </Text>
+        <TouchableOpacity onPress={() => router.push('/tenants')}>
+          <Text style={[styles.seeAllText, { color: colors.primary, fontFamily: typography.fonts.medium }]}>
+            See All
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Recent Tenants */}
-      <Text style={styles.sectionTitle}>Recent Tenants</Text>
       {tenants.slice(0, 5).map(tenant => (
         <TouchableOpacity 
           key={tenant.tenant_id}
-          style={styles.tenantCard}
+          activeOpacity={0.7}
           onPress={() => router.push(`/tenant-details?tenantId=${tenant.tenant_id}`)}
         >
-          <View style={styles.tenantHeader}>
-            <View>
-              <Text style={styles.tenantName}>{tenant.name}</Text>
-              <Text style={styles.tenantRoom}>Room {tenant.room_number}</Text>
+          <Card style={styles.tenantCard} noPadding>
+            <View style={styles.tenantCardPadding}>
+              <View style={styles.tenantAvatarContainer}>
+                <View style={[styles.tenantAvatar, { backgroundColor: colors.inputBackground }]}>
+                  <Text style={[styles.avatarText, { color: colors.primary, fontFamily: typography.fonts.bold }]}>
+                    {tenant.name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.tenantInfo}>
+                  <Text style={[styles.tenantName, { color: colors.text, fontFamily: typography.fonts.semibold }]} numberOfLines={1}>
+                    {tenant.name}
+                  </Text>
+                  <Text style={[styles.tenantRoom, { color: colors.textSecondary }]}>
+                    Room {tenant.room_number} • {formatCurrency(tenant.monthly_rent)} UGX
+                  </Text>
+                </View>
+              </View>
+              <View 
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: getStatusBackground(tenant.status) }
+                ]}
+              >
+                <Text style={[styles.statusText, { color: getStatusColor(tenant.status), fontFamily: typography.fonts.medium }]}>
+                  {tenant.status}
+                </Text>
+              </View>
             </View>
-            <View 
-              style={[
-                styles.statusBadge,
-                { backgroundColor: getStatusColor(tenant.status) + '20' }
-              ]}
-            >
-              <Text style={[styles.statusText, { color: getStatusColor(tenant.status) }]}>
-                {tenant.status}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.rentText}>
-            Rent: {tenant.monthly_rent} UGX
-          </Text>
+          </Card>
         </TouchableOpacity>
       ))}
 
       {tenants.length === 0 && (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyStateText}>
-            No tenants yet.{'\n'}Add your first tenant to get started!
+          <Ionicons name="home-outline" size={48} color={colors.border} />
+          <Text style={[styles.emptyStateTitle, { color: colors.text, fontFamily: typography.fonts.semibold }]}>
+            No Tenants Yet
           </Text>
+          <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>
+            Add your first tenant to start tracking rent payments and managing your portfolio.
+          </Text>
+          <Button 
+            title="Add Tenant" 
+            onPress={() => router.push('/add-tenant')}
+            style={{ marginTop: 16 }}
+            variant="secondary"
+          />
         </View>
       )}
     </ScrollView>
@@ -217,8 +276,10 @@ export default function Dashboard() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 16,
-    backgroundColor: '#F9FAFB',
+  },
+  contentContainer: {
+    padding: 20,
+    paddingBottom: 100, // Make room for floating tab bar
   },
   centerContainer: {
     flex: 1,
@@ -226,137 +287,188 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
-  
-  subtitle: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 4,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 24,
-  },
-  statCard: {
-    padding: 16,
-    borderRadius: 8,
-    width: '48%',
-    marginBottom: 12,
-  },
-  statLabel: {
+  greeting: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
     marginBottom: 4,
   },
-  statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1F2937',
+  title: {
+    fontSize: 28,
   },
-  actionsContainer: {
-    marginBottom: 24,
+  
+  // Hero Card
+  heroCard: {
+    padding: 24,
+    marginBottom: 20,
+    borderWidth: 0, // Removes border from theme for Hero specifically if any
   },
-  actionButton: {
-    backgroundColor: '#007AFF',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  actionButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 12,
-    color: '#1F2937',
-  },
-  tenantCard: {
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  tenantHeader: {
+  heroRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+  },
+  heroLabel: {
+    fontSize: 14,
     marginBottom: 8,
   },
-  tenantName: {
-    fontSize: 18,
+  heroAmount: {
+    fontSize: 32,
+    color: '#FFFFFF',
+  },
+  healthBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  healthText: {
+    color: '#FFFFFF',
+    fontSize: 12,
     fontWeight: '600',
-    color: '#1F2937',
+    marginLeft: 6,
+  },
+  heroDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    marginVertical: 20,
+  },
+  heroMetrics: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  heroMetricItem: {
+    alignItems: 'center',
+  },
+  heroMetricValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  heroMetricLabel: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+
+  // Secondary Metrics
+  secondaryMetricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  smallMetricCard: {
+    width: '48%',
+    padding: 16,
+  },
+  metricIcon: {
+    marginBottom: 12,
+  },
+  metricLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  metricValue: {
+    fontSize: 18,
+  },
+
+  actionsContainer: {
+    marginBottom: 32,
+  },
+
+  // List Items
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 20,
+  },
+  seeAllText: {
+    fontSize: 14,
+  },
+  tenantCard: {
+    marginBottom: 12,
+  },
+  tenantCardPadding: {
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  tenantAvatarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  tenantAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    fontSize: 18,
+  },
+  tenantInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  tenantName: {
+    fontSize: 16,
+    marginBottom: 4,
   },
   tenantRoom: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 2,
+    fontSize: 13,
   },
   statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   statusText: {
     fontSize: 12,
-    fontWeight: '500',
   },
-  rentText: {
+
+  // Alerts
+  alertContainer: {
+    padding: 16,
+    marginBottom: 24,
+    borderLeftWidth: 4,
+  },
+  alertTitle: {
     fontSize: 14,
-    color: '#6B7280',
+    fontWeight: 'bold',
+    marginBottom: 8,
   },
+  alertItem: {
+    marginBottom: 4,
+  },
+  alertText: {
+    fontSize: 13,
+  },
+
+  // Empty State
   emptyState: {
-    backgroundColor: '#F3F4F6',
-    padding: 32,
-    borderRadius: 8,
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    marginTop: 16,
+    marginBottom: 8,
   },
   emptyStateText: {
-    fontSize: 16,
-    color: '#6B7280',
+    fontSize: 14,
     textAlign: 'center',
-    lineHeight: 24,
+    paddingHorizontal: 20,
+    lineHeight: 20,
   },
-  alertContainer: {
-  backgroundColor: '#FEF3C7',
-  padding: 16,
-  borderRadius: 8,
-  marginBottom: 16,
-  borderLeftWidth: 4,
-  borderLeftColor: '#F59E0B',
-},
-alertTitle: {
-  fontSize: 16,
-  fontWeight: 'bold',
-  marginBottom: 8,
-  color: '#92400E',
-},
-alertItem: {
-  padding: 8,
-  borderRadius: 4,
-  marginBottom: 4,
-},
-suspensionAlert: {
-  backgroundColor: '#FEE2E2',
-},
-contractAlert: {
-  backgroundColor: '#DBEAFE',
-},
-alertText: {
-  fontSize: 14,
-  color: '#1F2937',
-},
 });
-
