@@ -1,0 +1,3 @@
+Testing the actual AuthHub login round-trip on your device
+Configuring Supabase's Third-Party Auth to trust AuthHub tokens (needed before the dormant remote/sync repositories can work)
+The remaining mechanical bugs from the original review (broken ../../../ import paths in repositories/remote/*, hard-delete in cancelPayment, duplicate index, missing jest-expo dependency)
